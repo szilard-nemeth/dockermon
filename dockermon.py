@@ -29,23 +29,53 @@ class DockermonError(Exception):
     pass
 
 
+class Helper:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def format_timestamp(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+
 class DockerEvent:
-    def __init__(self, event_type, container_name, time_in_seconds):
+    def __init__(self, event_type, container_name, timestamp):
         self.type = event_type
         self.container_name = container_name
-        self.time = time_in_seconds
-        self.formatted_time = datetime.datetime.fromtimestamp(time_in_seconds).strftime('%Y-%m-%d %H:%M:%S')
+        self.time = timestamp
+        self.formatted_time = Helper.format_timestamp(timestamp)
 
     def __str__(self):
-        return "DockerEvent: type: %s, container_name: %s, time: %s, formatted_time: %s" \
+        return "type: %s, container_name: %s, time: %s, formatted_time: %s" \
                % (self.type, self.container_name, self.time, self.formatted_time)
 
 
+class RestartData:
+    def __init__(self, container_name, timestamp=None):
+        self.container_name = container_name
+        if timestamp:
+            self.occasions = [timestamp]
+            self.formatted_occasions = [Helper.format_timestamp(timestamp)]
+        else:
+            self.occasions = []
+            self.formatted_occasions = []
+
+    def add_restart_occasion(self, timestamp):
+        self.occasions.append(timestamp)
+        self.formatted_occasions.append(Helper.format_timestamp(timestamp))
+
+    def __str__(self):
+        return "container_name: %s, occasions: %s, formatted_occasions: %s" \
+               % (self.container_name, self.occasions, self.formatted_occasions)
+
+
 class DockerMon:
-    event_types_to_check = ['die', 'stop', 'kill']
+    event_types_to_watch = ['die', 'stop', 'kill', 'start']
+    max_restart_count = 3
 
     def __init__(self):
         self.event_dict = {}
+        self.container_restarts = {}
 
     def save_docker_event(self, event):
         container_name = event.container_name
@@ -53,6 +83,22 @@ class DockerMon:
             self.event_dict[container_name] = []
 
         self.event_dict[container_name].append(event)
+
+    def save_restart_occasion(self, container_name):
+        now = time.time()
+        if container_name not in self.container_restarts:
+            self.container_restarts[container_name] = RestartData(container_name, now)
+        else:
+            self.container_restarts[container_name].add_restart_occasion(now)
+
+    def get_performed_restart_count(self, container_name):
+        if container_name not in self.container_restarts:
+            self.container_restarts[container_name] = RestartData(container_name)
+
+        return len(self.container_restarts[container_name].occasions)
+
+    def reset_restart_data(self, container_name):
+        self.container_restarts[container_name] = RestartData(container_name)
 
     @staticmethod
     def read_http_header(sock):
@@ -141,19 +187,23 @@ class DockerMon:
                         container_name = parsed_json['Actor']['Attributes']["name"]
                         event_time = parsed_json['time']
 
-                        if event_status in DockerMon.event_types_to_check:
+                        if event_status in DockerMon.event_types_to_watch:
                             docker_event = DockerEvent(event_status, container_name, event_time)
                             self.save_docker_event(docker_event)
-                            restart_needed = self.check_restart_needed(container_name)
-                            if restart_needed:
-                                print "Container %s dead unexpectedly, restarting..." % container_name
-                                restart_callback(url, parsed_json)
+                            if event_status == 'start':
+                                self.maintain_container_restarts(container_name)
+                            else:
+                                restart_needed = self.check_restart_needed(container_name)
+                                if restart_needed:
+                                    print "Container %s dead unexpectedly, restarting..." % container_name
+                                    restart_callback(url, parsed_json)
 
                         # restart immediately if container is unhealthy
                         elif "health_status: unhealthy" in event_status:
                             print "Container %s became unhealthy, restarting..." % container_name
                             docker_event = DockerEvent(event_status, container_name, event_time)
                             self.save_docker_event(docker_event)
+                            self.maintain_container_restarts(container_name)
                             restart_callback(url, parsed_json)
 
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
@@ -188,10 +238,13 @@ class DockerMon:
             stop_or_kill_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 30, now), stop_or_kill_events)
 
             if stop_or_kill_events:
-                print "Container %s WILL NOT BE restarted as it was stopped or killed by hand" % container_name
+                print "Container %s is stopped/killed, but WILL NOT BE restarted as it was stopped/killed by hand" % container_name
                 return False
             else:
-                return True
+                if self.is_restart_allowed(container_name):
+                    return True
+                else:
+                    print "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s" % (container_name, DockerMon.max_restart_count)
         else:
             return False
 
@@ -231,9 +284,36 @@ class DockerMon:
 
             # checking the HTTP status, no payload should be received!
             if status == HTTP_NO_CONTENT:
-                print "Restarting %s..." % container_name
+                self.save_restart_occasion(container_name)
+                count_of_restarts = self.get_performed_restart_count(container_name)
+                print "Restarting %s (%s / %s)..." % (container_name, count_of_restarts, DockerMon.max_restart_count)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
+
+    def is_restart_allowed(self, container_name):
+        restart_count = self.get_performed_restart_count(container_name)
+        last_restarts = self.container_restarts[container_name].occasions[-DockerMon.max_restart_count:]
+
+        now = time.time()
+        # TODO add this as script argument (10 minutes as a default)
+        ten_minutes_ago = now - 10 * 60
+        for r in last_restarts:
+            if r < ten_minutes_ago:
+                return False
+
+        return restart_count < DockerMon.max_restart_count
+
+    def maintain_container_restarts(self, container_name):
+        if container_name not in self.container_restarts:
+            return
+        last_restart = self.container_restarts[container_name].occasions[-1]
+        now = time.time()
+        # TODO add this as script argument (2 minutes as a default)
+        two_minutes_ago = now - 2*60
+        if last_restart < two_minutes_ago:
+            print "Start/healthy event received for container %s, clearing restart counter..." % container_name
+            print "Last restart time was %s" % Helper.format_timestamp(last_restart)
+            self.reset_restart_data(container_name)
 
 
 if __name__ == '__main__':
