@@ -1,5 +1,18 @@
 FROM python:2.7.13-slim
 
-ADD dockermon.py /
+RUN pip install pyyaml
 
-CMD [ "python", "dockermon.py" ]
+#RUN apt-get update && \
+#    apt-get -y install python-yaml && \
+#    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y gettext-base
+
+
+ADD interpolate-env-vars.sh /
+RUN chmod +x /*.sh
+ADD dockermon.py /
+ADD config.yml /
+
+CMD [ "python", "dockermon.py", "--config-file", "/config.yml" ]

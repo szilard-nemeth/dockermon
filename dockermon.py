@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 """docker monitor using docker /events HTTP streaming API"""
-
 from contextlib import closing
 from functools import partial
 from socket import socket, AF_UNIX
@@ -319,6 +318,7 @@ class DockerMon:
 if __name__ == '__main__':
     import argparse
     import yaml
+    import subprocess
     from pprint import pprint
 
 
@@ -367,26 +367,32 @@ if __name__ == '__main__':
 
     def parse_args(parser):
         args = parser.parse_args()
-        print("Command line arguments: ")
-        pprint(args)
 
         if args.config_file:
             print "Using config file %s" % args.config_file.name
             data = yaml.load(args.config_file)
             delattr(args, 'config_file')
             arg_dict = args.__dict__
+
+            print "Values read from config file: %s" % data.items()
             for key, value in data.items():
                 key = key.replace('-', '_')
+                if not value:
+                    print "Omitting empty value from config file for key: %s!" % key
+                    continue
+
+                print "Using param from config file: %s=%s" % (key, value)
                 if isinstance(value, list):
-                    print "Using param from config file %s=%s" % (key, value)
                     for v in value:
                         arg_dict[key].append(v)
                 else:
-                    print "Using param from config file %s=%s" % (key, value)
                     arg_dict[key] = value
+
+        print("Command line arguments after processing: ")
+        pprint(args)
         return args
 
-
+    subprocess.check_call("/interpolate-env-vars.sh")
     args = get_args()
 
 
