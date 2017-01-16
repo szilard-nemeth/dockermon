@@ -393,8 +393,12 @@ if __name__ == '__main__':
         return args
 
     subprocess.check_call("/interpolate-env-vars.sh")
+    interpolate_script_filename = "/interpolate-env-vars.sh"
+    if os.path.isfile(interpolate_script_filename):
+        subprocess.check_call(interpolate_script_filename)
     args = get_args()
 
+    containers_to_restart = preprocess_containers_to_restart(args.containers_to_restart)
 
     if args.version:
         print('dockermon %s' % __version__)
