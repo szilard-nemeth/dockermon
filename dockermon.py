@@ -71,11 +71,11 @@ class RestartData:
 
 class DockerMon:
     event_types_to_watch = ['die', 'stop', 'kill', 'start']
-    max_restart_count = 3
 
-    def __init__(self):
+    def __init__(self, args):
         self.event_dict = {}
         self.container_restarts = {}
+        self.args = args
 
     def save_docker_event(self, event):
         container_name = event.container_name
@@ -234,7 +234,8 @@ class DockerMon:
         die_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 5, now), die_events)
 
         if die_events:
-            stop_or_kill_events = filter(lambda e: DockerMon.event_type_matches_one_of(e, ['stop', 'kill']), docker_events)
+            stop_or_kill_events = filter(lambda e: DockerMon.event_type_matches_one_of(e, ['stop', 'kill']),
+                                         docker_events)
             stop_or_kill_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 30, now), stop_or_kill_events)
 
             if stop_or_kill_events:
@@ -244,7 +245,8 @@ class DockerMon:
                 if self.is_restart_allowed(container_name):
                     return True
                 else:
-                    print "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s" % (container_name, DockerMon.max_restart_count)
+                    print "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s" % (
+                    container_name, self.args.restart_limit)
         else:
             return False
 
@@ -286,55 +288,107 @@ class DockerMon:
             if status == HTTP_NO_CONTENT:
                 self.save_restart_occasion(container_name)
                 count_of_restarts = self.get_performed_restart_count(container_name)
-                print "Restarting %s (%s / %s)..." % (container_name, count_of_restarts, DockerMon.max_restart_count)
+                print "Restarting %s (%s / %s)..." % (container_name, count_of_restarts, self.args.restart_limit)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
 
     def is_restart_allowed(self, container_name):
         restart_count = self.get_performed_restart_count(container_name)
-        last_restarts = self.container_restarts[container_name].occasions[-DockerMon.max_restart_count:]
+        last_restarts = self.container_restarts[container_name].occasions[-self.args.restart_limit:]
 
         now = time.time()
-        # TODO add this as script argument (10 minutes as a default)
-        ten_minutes_ago = now - 10 * 60
+        restart_range_start = now - self.args.restart_threshold * 60
         for r in last_restarts:
-            if r < ten_minutes_ago:
+            if r < restart_range_start:
                 return False
 
-        return restart_count < DockerMon.max_restart_count
+        return restart_count < self.args.restart_limit
 
     def maintain_container_restarts(self, container_name):
         if container_name not in self.container_restarts:
             return
         last_restart = self.container_restarts[container_name].occasions[-1]
         now = time.time()
-        # TODO add this as script argument (2 minutes as a default)
-        two_minutes_ago = now - 2*60
-        if last_restart < two_minutes_ago:
+        restart_reset_range_start = now - self.args.restart_reset_period * 60
+        if last_restart < restart_reset_range_start:
             print "Start/healthy event received for container %s, clearing restart counter..." % container_name
             print "Last restart time was %s" % Helper.format_timestamp(last_restart)
             self.reset_restart_data(container_name)
 
 
 if __name__ == '__main__':
-    from argparse import ArgumentParser
+    import argparse
+    import yaml
+    from pprint import pprint
 
-    parser = ArgumentParser(description=__doc__)
-    parser.add_argument('--prog', default=None,
-                        help='program to call (e.g. "jq --unbuffered .")')
-    parser.add_argument(
-        '--socket-url', default=default_sock_url,
-        help='socket url (ipc:///path/to/sock or tcp:///host:port)')
-    parser.add_argument(
-        '--version', help='print version and exit',
-        action='store_true', default=False)
 
-    # restart containers on unhealthy state OR when they are dead
-    # manual kill won't restart
-    parser.add_argument('--restart-containers', dest='restart_containers', action='store_true')
-    parser.add_argument('--do-not-restart-containers', dest='restart_containers', action='store_false')
-    parser.set_defaults(restart_containers=True)
-    args = parser.parse_args()
+    def get_args():
+        parser = create_parser()
+        return parse_args(parser)
+
+
+    def create_parser():
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('--prog', default=None,
+                            help='program to call (e.g. "jq --unbuffered .")')
+        parser.add_argument('--socket-url', default=default_sock_url,
+                            help='socket url (ipc:///path/to/sock or tcp:///host:port)')
+        parser.add_argument('--version', default=False,
+                            help='print version and exit', action='store_true')
+
+        parser.add_argument('--config-file',
+                            dest='config_file',
+                            help='config file in yaml format',
+                            type=argparse.FileType(mode='r'))
+
+        # restart containers on unhealthy state OR when they are dead
+        # manual kill won't restart
+        restart_group = parser.add_mutually_exclusive_group()
+        restart_group.add_argument('--restart-containers', dest='restart_containers', action='store_true')
+        restart_group.add_argument('--do-not-restart-containers', dest='restart_containers', action='store_false')
+        parser.set_defaults(restart_containers=True)
+
+        restart_options_group = parser.add_argument_group('Restart options')
+        restart_options_group.add_argument('--restart-limit', default=3,
+                                           dest='restart_limit',
+                                           help='Consecutive restart allowed in restart threshold period',
+                                           action='store')
+        restart_options_group.add_argument('--restart-threshold', default=10,
+                                           dest='restart_threshold',
+                                           help='Period in minutes that limits consecutive restarts',
+                                           action='store')
+        restart_options_group.add_argument('--restart-reset-period', default=2,
+                                           dest='restart_reset_period',
+                                           help='Minutes to wait to reset restart counter for containers',
+                                           action='store')
+
+        return parser
+
+
+    def parse_args(parser):
+        args = parser.parse_args()
+        print("Command line arguments: ")
+        pprint(args)
+
+        if args.config_file:
+            print "Using config file %s" % args.config_file.name
+            data = yaml.load(args.config_file)
+            delattr(args, 'config_file')
+            arg_dict = args.__dict__
+            for key, value in data.items():
+                key = key.replace('-', '_')
+                if isinstance(value, list):
+                    print "Using param from config file %s=%s" % (key, value)
+                    for v in value:
+                        arg_dict[key].append(v)
+                else:
+                    print "Using param from config file %s=%s" % (key, value)
+                    arg_dict[key] = value
+        return args
+
+
+    args = get_args()
+
 
     if args.version:
         print('dockermon %s' % __version__)
@@ -346,7 +400,7 @@ if __name__ == '__main__':
     else:
         callback = DockerMon.print_callback
 
-    dockermon = DockerMon()
+    dockermon = DockerMon(args)
 
     try:
         if args.restart_containers:
