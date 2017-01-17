@@ -1,3 +1,5 @@
 restart-limit: ${RESTART_LIMIT}
 restart-threshold: ${RESTART_THRESHOLD}
 restart-reset-period: ${RESTART_RESET_PERIOD}
+containers-to-restart: ${CONTAINERS_TO_RESTART}
+restart-notification-email-addresses-path: ${RESTART_NOTIFICATION_EMAIL_RECIPIENT_PATH}
