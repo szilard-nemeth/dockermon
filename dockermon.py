@@ -3,7 +3,7 @@
 import os
 from contextlib import closing
 from functools import partial
-from socket import socket, AF_UNIX
+from socket import AF_UNIX
 from subprocess import Popen, PIPE
 from sys import version_info
 import json
@@ -15,6 +15,9 @@ import datetime
 import re
 import logging
 import logging.config
+import smtplib
+import socket
+from email.mime.text import MIMEText
 
 if version_info[:2] < (3, 0):
     from httplib import OK as HTTP_OK
@@ -79,10 +82,11 @@ class RestartData:
 class DockerMon:
     event_types_to_watch = ['die', 'stop', 'kill', 'start']
 
-    def __init__(self, args):
+    def __init__(self, args, mail_recipients):
         self.event_dict = {}
         self.container_restarts = {}
         self.args = args
+        self.mail_recipients = mail_recipients
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
 
     def save_docker_event(self, event):
@@ -107,6 +111,23 @@ class DockerMon:
 
     def reset_restart_data(self, container_name):
         self.container_restarts[container_name] = RestartData(container_name)
+
+    def send_mail(self, subject, msg):
+        if not self.mail_recipients:
+            logger.debug('Skipping email notification as recipient email addresses are not set!')
+            return
+        email_msg = MIMEText(str(msg))
+
+        email_from = 'root'
+        email_to = ', '.join(self.mail_recipients)
+        email_subject = '%s dockermon: %s' % (socket.gethostname(), subject)
+        email_msg['From'] = email_from
+        email_msg['To'] = email_to
+        email_msg['Subject'] = email_subject
+        smtp = smtplib.SMTP('localhost')
+        restart_logger.info('Sending mail to addresses %s...', email_to)
+        smtp.sendmail(email_from, self.mail_recipients, email_msg.as_string())
+        smtp.quit()
 
     @staticmethod
     def read_http_header(sock):
@@ -138,11 +159,11 @@ class DockerMon:
         """
         url = urlparse(url)
         if url.scheme == 'tcp':
-            sock = socket()
+            sock = socket.socket()
             netloc = tuple(url.netloc.rsplit(':', 1))
             hostname = socket.gethostname()
         elif url.scheme == 'ipc':
-            sock = socket(AF_UNIX)
+            sock = socket.socket(AF_UNIX)
             netloc = url.path
             hostname = 'localhost'
         else:
@@ -201,7 +222,7 @@ class DockerMon:
                             if event_status == 'start':
                                 self.maintain_container_restarts(container_name)
                             elif self.check_container_is_restartable(container_name) and self.check_restart_needed(
-                                    container_name):
+                                    container_name, parsed_json):
                                 restart_logger.info("Container %s dead unexpectedly, restarting...", container_name)
                                 restart_callback(url, parsed_json)
 
@@ -247,7 +268,7 @@ class DockerMon:
         pipe.stdin.write(data.encode('utf-8'))
         pipe.stdin.close()
 
-    def check_restart_needed(self, container_name):
+    def check_restart_needed(self, container_name, parsed_json):
         docker_events = self.event_dict[container_name]
 
         if not docker_events:
@@ -255,12 +276,12 @@ class DockerMon:
 
         now = time.time()
         die_events = filter(lambda e: DockerMon.event_type_matches(e, 'die'), docker_events)
-        die_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 5, now), die_events)
+        die_events = filter(lambda e: DockerMon.event_max_age_in_seconds(e, 5, now), die_events)
 
         if die_events:
             stop_or_kill_events = filter(lambda e: DockerMon.event_type_matches_one_of(e, ['stop', 'kill']),
                                          docker_events)
-            stop_or_kill_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 30, now), stop_or_kill_events)
+            stop_or_kill_events = filter(lambda e: DockerMon.event_max_age_in_seconds(e, 12, now), stop_or_kill_events)
 
             if stop_or_kill_events:
                 restart_logger.debug(
@@ -272,13 +293,15 @@ class DockerMon:
                     return True
                 else:
                     restart_logger.warn(
-                        "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s",
+                        "Container %s is stopped/killed, but WILL NOT BE restarted again, as maximum restart count is reached: %s",
                         container_name, self.args.restart_limit)
+                    subject = "Maximum restart count is reached for container %s" % container_name
+                    self.send_mail(subject, json.dumps(parsed_json))
         else:
             return False
 
     @staticmethod
-    def event_newer_than_seconds(ev, max_age_in_seconds, now):
+    def event_max_age_in_seconds(ev, max_age_in_seconds, now):
         age_in_seconds = now - ev.time
         if age_in_seconds <= max_age_in_seconds:
             return True
@@ -295,10 +318,10 @@ class DockerMon:
                 return True
         return False
 
-    def restart_callback(self, url, msg):
-        container_id = msg['id']
-        container_name = msg['Actor']['Attributes']["name"]
-        compose_service_name = msg['Actor']['Attributes']["com.docker.compose.service"]
+    def restart_callback(self, url, parsed_json):
+        container_id = parsed_json['id']
+        container_name = parsed_json['Actor']['Attributes']["name"]
+        compose_service_name = parsed_json['Actor']['Attributes']["com.docker.compose.service"]
 
         sock, hostname = DockerMon.connect(url)
         restart_logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
@@ -315,7 +338,9 @@ class DockerMon:
             if status == HTTP_NO_CONTENT:
                 self.save_restart_occasion(container_name)
                 count_of_restarts = self.get_performed_restart_count(container_name)
-                restart_logger.info("Restarting %s (%s / %s)...", container_name, count_of_restarts, self.args.restart_limit)
+                log_record = "Restarting container: %s (%s / %s)..." % (container_name, count_of_restarts, self.args.restart_limit)
+                restart_logger.info(log_record)
+                self.send_mail(log_record, json.dumps(parsed_json))
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
 
@@ -416,12 +441,16 @@ if __name__ == '__main__':
                                            help='Restart only specified containers, defaults to all containers',
                                            action='store')
 
+        notification_options_group = parser.add_argument_group('Notification options')
+        notification_options_group.add_argument('--restart-notification-email-addresses-path', default=None,
+                                                dest='restart_notification_email_addresses_path',
+                                                help='Send mail notifications of container restarts to the addresses from the specified file',
+                                                action='store')
         return parser
 
 
     def parse_args(parser):
         args = parser.parse_args()
-
         args.containers_to_restart = []
         if args.config_file:
             logger.info("Using config file %s", args.config_file.name)
@@ -448,6 +477,7 @@ if __name__ == '__main__':
             args.containers_to_restart = ['.*']
         else:
             args.containers_to_restart = convert_containers_to_restart(args.containers_to_restart)
+
         logger.debug("Command line arguments after processing: %s", pprint.pformat(args))
         return args
 
@@ -463,9 +493,23 @@ if __name__ == '__main__':
 
         return result
 
+    def get_mail_recipients(args):
+        recipient_list_file = args.restart_notification_email_addresses_path
+        if not args.restart_notification_email_addresses_path or not os.path.exists(recipient_list_file):
+            logger.error('Email recipient list file path for restart notifications are not provided, exiting...')
+            raise SystemExit
+        else:
+            if os.path.exists(recipient_list_file):
+                with open(recipient_list_file) as f:
+                    mail_recipients = f.read().splitlines()
+                if not mail_recipients:
+                    logger.error('Email recipient list file %s for container restart notifications seems empty, exiting...', recipient_list_file)
+                    raise SystemExit
+                else:
+                    logger.info("Will send mails to the following addresses about docker container restarts: %s", mail_recipients)
+                    return mail_recipients
 
     setup_logging()
-    logger.debug("test")
     interpolate_script_filename = "/interpolate-env-vars.sh"
     if os.path.isfile(interpolate_script_filename):
         subprocess.check_call(interpolate_script_filename)
@@ -481,7 +525,8 @@ if __name__ == '__main__':
     else:
         callback = DockerMon.print_callback
 
-    dockermon = DockerMon(args)
+    mail_recipients = get_mail_recipients(args)
+    dockermon = DockerMon(args, mail_recipients)
 
     try:
         if args.restart_containers_on_die:
