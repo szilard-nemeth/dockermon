@@ -5,7 +5,7 @@ from contextlib import closing
 from functools import partial
 from socket import socket, AF_UNIX
 from subprocess import Popen, PIPE
-from sys import stdout, version_info
+from sys import version_info
 import json
 import shlex
 
@@ -13,6 +13,8 @@ import time
 import datetime
 
 import re
+import logging
+import logging.config
 
 if version_info[:2] < (3, 0):
     from httplib import OK as HTTP_OK
@@ -25,6 +27,9 @@ else:
 __version__ = '0.2.2'
 bufsize = 1024
 default_sock_url = 'ipc:///var/run/docker.sock'
+
+logger = logging.getLogger('dockermon')
+restart_logger = logging.getLogger('dockermon-restart')
 
 
 class DockermonError(Exception):
@@ -197,12 +202,12 @@ class DockerMon:
                                 self.maintain_container_restarts(container_name)
                             elif self.check_container_is_restartable(container_name) and self.check_restart_needed(
                                     container_name):
-                                print "Container %s dead unexpectedly, restarting..." % container_name
+                                restart_logger.info("Container %s dead unexpectedly, restarting...", container_name)
                                 restart_callback(url, parsed_json)
 
                         # restart immediately if container is unhealthy
                         elif "health_status: unhealthy" in event_status:
-                            print "Container %s became unhealthy, restarting..." % container_name
+                            restart_logger.info("Container %s became unhealthy, restarting...", container_name)
                             docker_event = DockerEvent(event_status, container_name, event_time)
                             self.save_docker_event(docker_event)
                             self.maintain_container_restarts(container_name)
@@ -214,31 +219,25 @@ class DockerMon:
         if container_name in self.cached_container_names['restart']:
             return True
         elif container_name in self.cached_container_names['do_not_restart']:
-            # TODO debug log
-            print "Container %s is stopped/killed, " \
-                  "but WILL NOT BE restarted as it does not match any names from configuration " \
-                  "'containers-to-restart'." % container_name
+            restart_logger.debug("Container %s is stopped/killed, "
+                                 "but WILL NOT BE restarted as it does not match any names from configuration "
+                                 "'containers-to-restart'.", container_name)
             return False
         else:
             for pattern in self.args.containers_to_restart:
                 if pattern.match(container_name):
                     self.cached_container_names['restart'].append(container_name)
                     return True
-            # TODO debug log
-            print "Container %s is stopped/killed, " \
-                  "but WILL NOT BE restarted as it does not match any names from configuration " \
-                  "'containers-to-restart'." % container_name
+            restart_logger.debug("Container %s is stopped/killed, "
+                                 "but WILL NOT BE restarted as it does not match any names from configuration "
+                                 "'containers-to-restart'.", container_name)
             self.cached_container_names['do_not_restart'].append(container_name)
             return False
 
-
-
     @staticmethod
     def print_callback(msg):
-        """Print callback, prints message to stdout as JSON in one line."""
-        json.dump(msg, stdout)
-        stdout.write('\n')
-        stdout.flush()
+        """Print callback, prints message as info log as JSON in one line."""
+        logger.info(json.dumps(msg))
 
     @staticmethod
     def prog_callback(prog, msg):
@@ -264,13 +263,16 @@ class DockerMon:
             stop_or_kill_events = filter(lambda e: DockerMon.event_newer_than_seconds(e, 30, now), stop_or_kill_events)
 
             if stop_or_kill_events:
-                print "Container %s is stopped/killed, but WILL NOT BE restarted as it was stopped/killed by hand" % container_name
+                restart_logger.debug(
+                    "Container %s is stopped/killed, but WILL NOT BE restarted as it was stopped/killed by hand",
+                    container_name)
                 return False
             else:
                 if self.is_restart_allowed(container_name):
                     return True
                 else:
-                    print "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s" % (
+                    restart_logger.warn(
+                        "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s",
                         container_name, self.args.restart_limit)
         else:
             return False
@@ -299,8 +301,8 @@ class DockerMon:
         compose_service_name = msg['Actor']['Attributes']["com.docker.compose.service"]
 
         sock, hostname = DockerMon.connect(url)
-        print "Sending restart request to Docker API for container: {0} ({1}), compose service name: {2}" \
-            .format(container_name, container_id, compose_service_name)
+        restart_logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
+                            container_name, container_id, compose_service_name)
         request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
         request = request.encode('utf-8')
 
@@ -313,7 +315,7 @@ class DockerMon:
             if status == HTTP_NO_CONTENT:
                 self.save_restart_occasion(container_name)
                 count_of_restarts = self.get_performed_restart_count(container_name)
-                print "Restarting %s (%s / %s)..." % (container_name, count_of_restarts, self.args.restart_limit)
+                restart_logger.info("Restarting %s (%s / %s)...", container_name, count_of_restarts, self.args.restart_limit)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
 
@@ -336,8 +338,8 @@ class DockerMon:
         now = time.time()
         restart_reset_range_start = now - self.args.restart_reset_period * 60
         if last_restart < restart_reset_range_start:
-            print "Start/healthy event received for container %s, clearing restart counter..." % container_name
-            print "Last restart time was %s" % Helper.format_timestamp(last_restart)
+            restart_logger.info("Start/healthy event received for container %s, clearing restart counter...", container_name)
+            restart_logger.info("Last restart time was %s", Helper.format_timestamp(last_restart))
             self.reset_restart_data(container_name)
 
 
@@ -345,7 +347,27 @@ if __name__ == '__main__':
     import argparse
     import yaml
     import subprocess
-    from pprint import pprint
+    import pprint
+
+
+    def setup_logging(
+            default_path='logging.yaml',
+            default_level=logging.INFO,
+            env_key='LOG_CFG'
+    ):
+        """Setup logging configuration
+
+        """
+        path = default_path
+        value = os.getenv(env_key, None)
+        if value:
+            path = value
+        if os.path.exists(path):
+            with open(path, 'rt') as f:
+                config = yaml.safe_load(f.read())
+            logging.config.dictConfig(config)
+        else:
+            logging.basicConfig(level=default_level)
 
 
     def get_args():
@@ -402,19 +424,19 @@ if __name__ == '__main__':
 
         args.containers_to_restart = []
         if args.config_file:
-            print "Using config file %s" % args.config_file.name
+            logger.info("Using config file %s", args.config_file.name)
             data = yaml.load(args.config_file)
             delattr(args, 'config_file')
             arg_dict = args.__dict__
 
-            print "Values read from config file: %s" % data.items()
+            logger.debug("Values read from config file: %s", data.items())
             for key, value in data.items():
                 key = key.replace('-', '_')
                 if not value:
-                    print "Omitting empty value from config file for key: %s!" % key
+                    logger.warn("Omitting empty value from config file for key: %s!", key)
                     continue
 
-                print "Using param from config file: %s=%s" % (key, value)
+                logger.debug("Using param from config file: %s=%s", key, value)
                 if isinstance(value, list):
                     for v in value:
                         arg_dict[key].append(v)
@@ -426,14 +448,13 @@ if __name__ == '__main__':
             args.containers_to_restart = ['.*']
         else:
             args.containers_to_restart = convert_containers_to_restart(args.containers_to_restart)
-        print("Command line arguments after processing: ")
-        pprint(args)
+        logger.debug("Command line arguments after processing: %s", pprint.pformat(args))
         return args
 
 
     def convert_containers_to_restart(containers_to_restart):
         result = []
-        print "Converting containers_to_restart arguments to regex patterns: %s" % containers_to_restart
+        logger.info("Converting 'containers-to-restart' arguments to regex patterns: %s", containers_to_restart)
         for container in containers_to_restart:
             if '*' in container:
                 container = container.replace('*', '.*')
@@ -443,13 +464,15 @@ if __name__ == '__main__':
         return result
 
 
+    setup_logging()
+    logger.debug("test")
     interpolate_script_filename = "/interpolate-env-vars.sh"
     if os.path.isfile(interpolate_script_filename):
         subprocess.check_call(interpolate_script_filename)
     args = get_args()
 
     if args.version:
-        print('dockermon %s' % __version__)
+        logger.info('dockermon %s', __version__)
         raise SystemExit
 
     if args.prog:

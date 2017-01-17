@@ -14,5 +14,6 @@ ADD interpolate-env-vars.sh /
 RUN chmod +x /*.sh
 ADD dockermon.py /
 ADD config.yml /
+ADD logging.yaml /
 
 CMD [ "python", "dockermon.py", "--config-file", "/config.yml" ]
