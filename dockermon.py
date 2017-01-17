@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """docker monitor using docker /events HTTP streaming API"""
+import os
 from contextlib import closing
 from functools import partial
 from socket import socket, AF_UNIX
@@ -10,6 +11,8 @@ import shlex
 
 import time
 import datetime
+
+import re
 
 if version_info[:2] < (3, 0):
     from httplib import OK as HTTP_OK
@@ -75,6 +78,7 @@ class DockerMon:
         self.event_dict = {}
         self.container_restarts = {}
         self.args = args
+        self.cached_container_names = {'restart': [], 'do_not_restart': []}
 
     def save_docker_event(self, event):
         container_name = event.container_name
@@ -191,11 +195,10 @@ class DockerMon:
                             self.save_docker_event(docker_event)
                             if event_status == 'start':
                                 self.maintain_container_restarts(container_name)
-                            else:
-                                restart_needed = self.check_restart_needed(container_name)
-                                if restart_needed:
-                                    print "Container %s dead unexpectedly, restarting..." % container_name
-                                    restart_callback(url, parsed_json)
+                            elif self.check_container_is_restartable(container_name) and self.check_restart_needed(
+                                    container_name):
+                                print "Container %s dead unexpectedly, restarting..." % container_name
+                                restart_callback(url, parsed_json)
 
                         # restart immediately if container is unhealthy
                         elif "health_status: unhealthy" in event_status:
@@ -206,6 +209,29 @@ class DockerMon:
                             restart_callback(url, parsed_json)
 
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
+
+    def check_container_is_restartable(self, container_name):
+        if container_name in self.cached_container_names['restart']:
+            return True
+        elif container_name in self.cached_container_names['do_not_restart']:
+            # TODO debug log
+            print "Container %s is stopped/killed, " \
+                  "but WILL NOT BE restarted as it does not match any names from configuration " \
+                  "'containers-to-restart'." % container_name
+            return False
+        else:
+            for pattern in self.args.containers_to_restart:
+                if pattern.match(container_name):
+                    self.cached_container_names['restart'].append(container_name)
+                    return True
+            # TODO debug log
+            print "Container %s is stopped/killed, " \
+                  "but WILL NOT BE restarted as it does not match any names from configuration " \
+                  "'containers-to-restart'." % container_name
+            self.cached_container_names['do_not_restart'].append(container_name)
+            return False
+
+
 
     @staticmethod
     def print_callback(msg):
@@ -245,7 +271,7 @@ class DockerMon:
                     return True
                 else:
                     print "Container %s is stopped/killed, but WILL NOT BE restarted as maximum restart count is reached: %s" % (
-                    container_name, self.args.restart_limit)
+                        container_name, self.args.restart_limit)
         else:
             return False
 
@@ -344,9 +370,10 @@ if __name__ == '__main__':
         # restart containers on unhealthy state OR when they are dead
         # manual kill won't restart
         restart_group = parser.add_mutually_exclusive_group()
-        restart_group.add_argument('--restart-containers', dest='restart_containers', action='store_true')
-        restart_group.add_argument('--do-not-restart-containers', dest='restart_containers', action='store_false')
-        parser.set_defaults(restart_containers=True)
+        restart_group.add_argument('--restart-containers-on-die', dest='restart_containers_on_die', action='store_true')
+        restart_group.add_argument('--do-not-restart-containers-on-die', dest='restart_containers_on_die',
+                                   action='store_false')
+        parser.set_defaults(restart_containers_on_die=True)
 
         restart_options_group = parser.add_argument_group('Restart options')
         restart_options_group.add_argument('--restart-limit', default=3,
@@ -361,6 +388,11 @@ if __name__ == '__main__':
                                            dest='restart_reset_period',
                                            help='Minutes to wait to reset restart counter for containers',
                                            action='store')
+        # default=['*'] appended the given arguments to the default which is not the desired behavior
+        restart_options_group.add_argument('--containers-to-restart', default=None,
+                                           dest='containers_to_restart',
+                                           help='Restart only specified containers, defaults to all containers',
+                                           action='store')
 
         return parser
 
@@ -368,6 +400,7 @@ if __name__ == '__main__':
     def parse_args(parser):
         args = parser.parse_args()
 
+        args.containers_to_restart = []
         if args.config_file:
             print "Using config file %s" % args.config_file.name
             data = yaml.load(args.config_file)
@@ -388,17 +421,32 @@ if __name__ == '__main__':
                 else:
                     arg_dict[key] = value
 
+        # initialize list if empty
+        if not args.containers_to_restart:
+            args.containers_to_restart = ['.*']
+        else:
+            args.containers_to_restart = convert_containers_to_restart(args.containers_to_restart)
         print("Command line arguments after processing: ")
         pprint(args)
         return args
 
-    subprocess.check_call("/interpolate-env-vars.sh")
+
+    def convert_containers_to_restart(containers_to_restart):
+        result = []
+        print "Converting containers_to_restart arguments to regex patterns: %s" % containers_to_restart
+        for container in containers_to_restart:
+            if '*' in container:
+                container = container.replace('*', '.*')
+            compiled_regex = re.compile(container)
+            result.append(compiled_regex)
+
+        return result
+
+
     interpolate_script_filename = "/interpolate-env-vars.sh"
     if os.path.isfile(interpolate_script_filename):
         subprocess.check_call(interpolate_script_filename)
     args = get_args()
-
-    containers_to_restart = preprocess_containers_to_restart(args.containers_to_restart)
 
     if args.version:
         print('dockermon %s' % __version__)
@@ -413,7 +461,7 @@ if __name__ == '__main__':
     dockermon = DockerMon(args)
 
     try:
-        if args.restart_containers:
+        if args.restart_containers_on_die:
             dockermon.watch(callback, args.socket_url, restart_callback=dockermon.restart_callback)
         else:
             dockermon.watch(callback, args.socket_url)
