@@ -63,6 +63,7 @@ class DockerEvent:
 class RestartData:
     def __init__(self, container_name, timestamp=None):
         self.container_name = container_name
+        self.mail_sent = False
         if timestamp:
             self.occasions = [timestamp]
             self.formatted_occasions = [Helper.format_timestamp(timestamp)]
@@ -121,7 +122,7 @@ class DockerMon:
         email_smtp_server = self.args.restart_notification_email_server if self.args.restart_notification_email_server else socket.gethostname()
 
         email_msg = MIMEText(str(msg))
-        email_from = 'Docker container monitoring (dockermon)'
+        email_from = 'dockermon'
         email_to = ', '.join(self.mail_recipients)
         email_subject = '%s: %s' % (self.mail_hostname, subject)
 
@@ -231,7 +232,10 @@ class DockerMon:
                                 restart_callback(url, parsed_json)
 
                         # restart immediately if container is unhealthy
-                        elif "health_status: unhealthy" in event_status:
+                        elif "health_status: unhealthy" in event_status \
+                                and self.check_container_is_restartable(container_name) \
+                                and self.check_restart_needed(
+                                container_name, parsed_json):
                             restart_logger.info("Container %s became unhealthy, restarting...", container_name)
                             docker_event = DockerEvent(event_status, container_name, event_time)
                             self.save_docker_event(docker_event)
@@ -251,6 +255,7 @@ class DockerMon:
         else:
             for pattern in self.args.containers_to_restart:
                 if pattern.match(container_name):
+                    restart_logger.debug("Container %s is matched for container name pattern %s", container_name, pattern.pattern)
                     self.cached_container_names['restart'].append(container_name)
                     return True
             restart_logger.debug("Container %s is stopped/killed, "
@@ -299,8 +304,11 @@ class DockerMon:
                     restart_logger.warn(
                         "Container %s is stopped/killed, but WILL NOT BE restarted again, as maximum restart count is reached: %s",
                         container_name, self.args.restart_limit)
-                    subject = "Maximum restart count is reached for container %s" % container_name
-                    self.send_mail(subject, json.dumps(parsed_json))
+
+                    if not self.container_restarts[container_name].mail_sent:
+                        subject = "Maximum restart count is reached for container %s" % container_name
+                        self.send_mail(subject, json.dumps(parsed_json))
+                        self.container_restarts[container_name].mail_sent = True
         else:
             return False
 
