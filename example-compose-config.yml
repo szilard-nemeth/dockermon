@@ -1,0 +1,15 @@
+version: '2'
+services:
+  dockermon:
+    image: szyszy/dockermon:1.0.0
+    volumes:
+     - /var/run/docker.sock:/var/run/docker.sock
+     - /home/docker/dockermon/:/dockermon/
+     - /etc/hostname:/dockermon/host-hostname
+    environment:
+     - "RESTART_LIMIT=3"
+     - "RESTART_THRESHOLD=10"
+     - "RESTART_RESET_PERIOD=3"
+     - "CONTAINERS_TO_RESTART=['*container1*', '*container2*', '*container3*']"
+     - "RESTART_NOTIFICATION_EMAIL_RECIPIENT_PATH=/dockermon/dockermon-email-recipients.list"
+     - "RESTART_NOTIFICATION_EMAIL_SERVER=relay.example.com"
