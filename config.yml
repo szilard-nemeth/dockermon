@@ -4,3 +4,4 @@ restart-reset-period: ${RESTART_RESET_PERIOD}
 containers-to-restart: ${CONTAINERS_TO_RESTART}
 restart-notification-email-addresses-path: ${RESTART_NOTIFICATION_EMAIL_RECIPIENT_PATH}
 restart-notification-email-server: ${RESTART_NOTIFICATION_EMAIL_SERVER}
+do-not-print-events: ${DO_NOT_PRINT_EVENTS}

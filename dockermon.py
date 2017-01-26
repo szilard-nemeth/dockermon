@@ -213,7 +213,8 @@ class DockerMon:
                 payload = data[start:start + size]
 
                 parsed_json = json.loads(payload)
-                callback(parsed_json)
+                if callback:
+                    callback(parsed_json)
 
                 if restart_callback:
                     if "status" in parsed_json:
@@ -425,6 +426,8 @@ if __name__ == '__main__':
                             dest='config_file',
                             help='config file in yaml format',
                             type=argparse.FileType(mode='r'))
+        parser.add_argument('--do-not-print-events', default=False, action='store_true',
+                            help='Do not print docker events to console')
 
         # restart containers on unhealthy state OR when they are dead
         # manual kill won't restart
@@ -554,7 +557,9 @@ if __name__ == '__main__':
         logger.info('dockermon %s', __version__)
         raise SystemExit
 
-    if args.prog:
+    if args.do_not_print_events:
+        callback = None
+    elif args.prog:
         prog = shlex.split(args.prog)
         callback = partial(DockerMon.prog_callback, prog)
     else:
