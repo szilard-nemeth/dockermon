@@ -374,8 +374,10 @@ class DockerMon:
             return
         last_restart = self.container_restarts[container_name].occasions[-1]
         now = time.time()
-        restart_reset_range_start = now - self.args.restart_reset_period * 60
-        if last_restart < restart_reset_range_start:
+        restart_duration = now - last_restart
+        needs_counter_reset = restart_duration < self.args.restart_reset_period * 60
+
+        if needs_counter_reset:
             restart_logger.info("Start/healthy event received for container %s, clearing restart counter...", container_name)
             restart_logger.info("Last restart time was %s", Helper.format_timestamp(last_restart))
             self.reset_restart_data(container_name)
