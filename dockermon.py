@@ -227,21 +227,20 @@ class DockerMon:
                             self.save_docker_event(docker_event)
                             if event_status == 'start':
                                 self.maintain_container_restarts(container_name)
-                            elif self.check_container_is_restartable(container_name) and self.check_restart_needed(
-                                    container_name, parsed_json):
+                            elif self.check_container_is_restartable(container_name) \
+                                    and self.check_restart_needed(container_name, parsed_json):
                                 restart_logger.info("Container %s dead unexpectedly, restarting...", container_name)
                                 restart_callback(url, parsed_json)
 
                         # restart immediately if container is unhealthy
-                        elif "health_status: unhealthy" in event_status \
-                                and self.check_container_is_restartable(container_name) \
-                                and self.check_restart_needed(
-                                container_name, parsed_json):
-                            restart_logger.info("Container %s became unhealthy, restarting...", container_name)
+                        elif "health_status: unhealthy" in event_status:
                             docker_event = DockerEvent(event_status, container_name, event_time)
                             self.save_docker_event(docker_event)
-                            self.maintain_container_restarts(container_name)
-                            restart_callback(url, parsed_json)
+                            if self.check_container_is_restartable(container_name) \
+                                    and self.check_restart_needed(container_name, parsed_json):
+                                restart_logger.info("Container %s became unhealthy, restarting...", container_name)
+                                self.maintain_container_restarts(container_name)
+                                restart_callback(url, parsed_json)
 
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
 
@@ -256,7 +255,8 @@ class DockerMon:
         else:
             for pattern in self.args.containers_to_restart:
                 if pattern.match(container_name):
-                    restart_logger.debug("Container %s is matched for container name pattern %s", container_name, pattern.pattern)
+                    restart_logger.debug("Container %s is matched for container name pattern %s", container_name,
+                                         pattern.pattern)
                     self.cached_container_names['restart'].append(container_name)
                     return True
             restart_logger.debug("Container %s is stopped/killed, "
@@ -351,7 +351,8 @@ class DockerMon:
             if status == HTTP_NO_CONTENT:
                 self.save_restart_occasion(container_name)
                 count_of_restarts = self.get_performed_restart_count(container_name)
-                log_record = "Restarting container: %s (%s / %s)..." % (container_name, count_of_restarts, self.args.restart_limit)
+                log_record = "Restarting container: %s (%s / %s)..." % (
+                container_name, count_of_restarts, self.args.restart_limit)
                 restart_logger.info(log_record)
                 self.send_mail(log_record, json.dumps(parsed_json))
             else:
@@ -378,7 +379,8 @@ class DockerMon:
         needs_counter_reset = restart_duration < self.args.restart_reset_period * 60
 
         if needs_counter_reset:
-            restart_logger.info("Start/healthy event received for container %s, clearing restart counter...", container_name)
+            restart_logger.info("Start/healthy event received for container %s, clearing restart counter...",
+                                container_name)
             restart_logger.info("Last restart time was %s", Helper.format_timestamp(last_restart))
             self.reset_restart_data(container_name)
 
@@ -517,21 +519,26 @@ if __name__ == '__main__':
 
         return result
 
+
     def get_mail_recipients(args):
         recipient_list_file = args.restart_notification_email_addresses_path
         if not args.restart_notification_email_addresses_path:
-            raise SystemExit('Container restart notifications email recipient list file path is not provided, exiting...')
+            raise SystemExit(
+                'Container restart notifications email recipient list file path is not provided, exiting...')
         elif not os.path.exists(recipient_list_file):
-            raise SystemExit('Container restart notifications email recipient list file %s is not found or not readable, exiting...' % recipient_list_file)
+            raise SystemExit(
+                'Container restart notifications email recipient list file %s is not found or not readable, exiting...' % recipient_list_file)
         else:
             if os.path.exists(recipient_list_file):
                 with open(recipient_list_file) as f:
                     mail_recipients = f.read().splitlines()
                 if not mail_recipients:
-                    raise SystemExit('Container restart notifications email recipient list file %s seems empty, exiting...' % recipient_list_file)
+                    raise SystemExit(
+                        'Container restart notifications email recipient list file %s seems empty, exiting...' % recipient_list_file)
                 else:
                     logger.info("Container restart notifications will be sent to these addresses: %s", mail_recipients)
                     return mail_recipients
+
 
     setup_logging()
     interpolate_script_filename = "/interpolate-env-vars.sh"
