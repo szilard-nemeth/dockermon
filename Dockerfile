@@ -12,7 +12,7 @@ RUN apt-get update && \
 
 ADD interpolate-env-vars.sh /
 RUN chmod +x /*.sh
-ADD dockermon.py /
+ADD *.py /
 ADD config.yml /
 ADD logging.yaml /
 
