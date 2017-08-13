@@ -15,9 +15,8 @@ import datetime
 import re
 import logging
 import logging.config
-import smtplib
 import socket
-from email.mime.text import MIMEText
+import notificationservice
 
 if version_info[:2] < (3, 0):
     from httplib import OK as HTTP_OK
@@ -83,12 +82,11 @@ class RestartData:
 class DockerMon:
     event_types_to_watch = ['die', 'stop', 'kill', 'start']
 
-    def __init__(self, args, mail_recipients, mail_hostname):
+    def __init__(self, args, notification_service):
         self.event_dict = {}
         self.container_restarts = {}
         self.args = args
-        self.mail_recipients = mail_recipients
-        self.mail_hostname = mail_hostname
+        self.notification_service = notification_service
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
 
     def save_docker_event(self, event):
@@ -113,26 +111,6 @@ class DockerMon:
 
     def reset_restart_data(self, container_name):
         self.container_restarts[container_name] = RestartData(container_name)
-
-    def send_mail(self, subject, msg):
-        if not self.mail_recipients:
-            logger.warn('Skipping email notification as recipient email addresses are not set!')
-            return
-
-        email_smtp_server = self.args.restart_notification_email_server if self.args.restart_notification_email_server else socket.gethostname()
-
-        email_msg = MIMEText(str(msg))
-        email_from = 'dockermon'
-        email_to = ', '.join(self.mail_recipients)
-        email_subject = '%s: %s' % (self.mail_hostname, subject)
-
-        email_msg['From'] = email_from
-        email_msg['To'] = email_to
-        email_msg['Subject'] = email_subject
-        smtp = smtplib.SMTP(email_smtp_server)
-        restart_logger.info('Sending mail to email addresses %s...', email_to)
-        smtp.sendmail(email_from, self.mail_recipients, email_msg.as_string())
-        smtp.quit()
 
     @staticmethod
     def read_http_header(sock):
@@ -308,7 +286,7 @@ class DockerMon:
 
                     if not self.container_restarts[container_name].mail_sent:
                         subject = "Maximum restart count is reached for container %s" % container_name
-                        self.send_mail(subject, json.dumps(parsed_json))
+                        self.notification_service.send_mail(subject, json.dumps(parsed_json))
                         self.container_restarts[container_name].mail_sent = True
         else:
             return False
@@ -354,7 +332,7 @@ class DockerMon:
                 log_record = "Restarting container: %s (%s / %s)..." % (
                 container_name, count_of_restarts, self.args.restart_limit)
                 restart_logger.info(log_record)
-                self.send_mail(log_record, json.dumps(parsed_json))
+                self.notification_service.send_mail(log_record, json.dumps(parsed_json))
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
 
@@ -519,48 +497,13 @@ if __name__ == '__main__':
 
         return result
 
-
-    def get_mail_recipients(args):
-        recipient_list_file = args.restart_notification_email_addresses_path
-        if not args.restart_notification_email_addresses_path:
-            raise SystemExit(
-                'Container restart notifications email recipient list file path is not provided, exiting...')
-        elif not os.path.exists(recipient_list_file):
-            raise SystemExit(
-                'Container restart notifications email recipient list file %s is not found or not readable, exiting...' % recipient_list_file)
-        else:
-            if os.path.exists(recipient_list_file):
-                with open(recipient_list_file) as f:
-                    mail_recipients = f.read().splitlines()
-                if not mail_recipients:
-                    raise SystemExit(
-                        'Container restart notifications email recipient list file %s seems empty, exiting...' % recipient_list_file)
-                else:
-                    logger.info("Container restart notifications will be sent to these addresses: %s", mail_recipients)
-                    return mail_recipients
-
-
     setup_logging()
     interpolate_script_filename = "/interpolate-env-vars.sh"
     if os.path.isfile(interpolate_script_filename):
         subprocess.check_call(interpolate_script_filename)
 
-    host_hostname_filename = '/dockermon/host-hostname'
-    if os.path.isfile(host_hostname_filename):
-        mail_hostname = open(host_hostname_filename).read().replace('\n', '')
-        logger.debug("Provided hostname of host machine %s", mail_hostname)
-
-    try:
-        mail_hostname
-    except NameError:
-        mail_hostname = 'root'
-    else:
-        pass
-    logger.debug("Hostname will be used for notification emails: %s", mail_hostname)
-
     args = get_args()
-
-    mail_recipients = get_mail_recipients(args)
+    notification_service = notificationservice.NotificationService(args)
 
     if args.version:
         logger.info('dockermon %s', __version__)
@@ -574,7 +517,7 @@ if __name__ == '__main__':
     else:
         callback = DockerMon.print_callback
 
-    dockermon = DockerMon(args, mail_recipients, mail_hostname)
+    dockermon = DockerMon(args, notification_service)
     try:
         if args.restart_containers_on_die:
             dockermon.watch(callback, args.socket_url, restart_callback=dockermon.restart_callback)
