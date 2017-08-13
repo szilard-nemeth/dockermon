@@ -32,7 +32,7 @@ class RestartService:
         self.params = restart_params
         self.notification_service = notification_service
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
-        self.container_restarts = {}
+        self.restarts = {}
 
     def save_docker_event(self, event):
         container_name = event.container_name
@@ -109,26 +109,26 @@ class RestartService:
             container_name, self.params.restart_limit)
 
     def is_mail_sent(self, container_name):
-        return self.container_restarts[container_name].mail_sent
+        return self.restarts[container_name].mail_sent
 
     def set_mail_sent(self, container_name):
-        self.container_restarts[container_name].mail_sent = True
+        self.restarts[container_name].mail_sent = True
 
     def save_restart_occasion(self, container_name):
         now = time.time()
-        if container_name not in self.container_restarts:
-            self.container_restarts[container_name] = RestartData(container_name, now)
+        if container_name not in self.restarts:
+            self.restarts[container_name] = RestartData(container_name, now)
         else:
-            self.container_restarts[container_name].add_restart_occasion(now)
+            self.restarts[container_name].add_restart_occasion(now)
 
     def get_performed_restart_count(self, container_name):
-        if container_name not in self.container_restarts:
-            self.container_restarts[container_name] = RestartData(container_name)
+        if container_name not in self.restarts:
+            self.restarts[container_name] = RestartData(container_name)
 
-        return len(self.container_restarts[container_name].occasions)
+        return len(self.restarts[container_name].occasions)
 
     def reset_restart_data(self, container_name):
-        self.container_restarts[container_name] = RestartData(container_name)
+        self.restarts[container_name] = RestartData(container_name)
 
     def check_container_is_restartable(self, container_name):
         if container_name in self.cached_container_names['restart']:
@@ -153,7 +153,7 @@ class RestartService:
 
     def is_restart_allowed(self, container_name):
         restart_count = self.get_performed_restart_count(container_name)
-        last_restarts = self.container_restarts[container_name].occasions[-self.params.restart_limit:]
+        last_restarts = self.restarts[container_name].occasions[-self.params.restart_limit:]
 
         now = time.time()
         restart_range_start = now - self.params.restart_threshold * 60
@@ -164,9 +164,9 @@ class RestartService:
         return restart_count < self.params.restart_limit
 
     def maintain_container_restarts(self, container_name):
-        if container_name not in self.container_restarts:
+        if container_name not in self.restarts:
             return
-        last_restart = self.container_restarts[container_name].occasions[-1]
+        last_restart = self.restarts[container_name].occasions[-1]
         now = time.time()
         restart_duration = now - last_restart
         needs_counter_reset = restart_duration < self.params.restart_reset_period * 60
