@@ -222,7 +222,7 @@ if __name__ == '__main__':
     dockermon = DockerMon(notification_service, restart_service)
     try:
         if args.restart_containers_on_die:
-            dockermon.watch(callback, args.socket_url, restart_callback=restart_service.restart_callback)
+            dockermon.watch(callback, args.socket_url, restart_callback=restart_service.handle_docker_event)
         else:
             dockermon.watch(callback, args.socket_url)
     except (KeyboardInterrupt, EOFError):

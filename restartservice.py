@@ -58,12 +58,12 @@ class RestartService:
                     self.do_restart(parsed_json)
 
             # restart immediately if container is unhealthy
-            elif "health_status: unhealthy" in event_status \
-                    and self.check_container_is_restartable(container_name) \
-                    and self.check_restart_needed(container_name, parsed_json):
-                restart_logger.info("Container %s became unhealthy, restarting...", container_name)
+            elif "health_status: unhealthy" in event_status:
                 docker_event = DockerEvent(event_status, container_name, event_time)
                 self.save_docker_event(docker_event)
+                if self.check_container_is_restartable(container_name) \
+                        and self.check_restart_needed(container_name, parsed_json):
+                    restart_logger.info("Container %s became unhealthy, restarting...", container_name)
                 self.maintain_container_restarts(container_name)
                 self.do_restart(parsed_json)
 
