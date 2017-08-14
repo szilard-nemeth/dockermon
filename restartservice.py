@@ -79,7 +79,10 @@ class RestartService(Notifyable):
                 logger.info("Container %s dead unexpectedly, restarting...", container_name)
                 self.do_restart(event_details)
             else:
-                logger.info("Container %s dead unexpectedly, skipping restart as per configuration", container_name)
+                logger.info("Container %s dead unexpectedly, skipping restart but sending mail, as per configuration!",
+                            container_name)
+                self.notification_service.send_mail("Container %s dead unexpectedly" % container_name,
+                                                    json.dumps(event_details))
         else:
             logger.warn("Container %s is stopped/killed, but WILL NOT BE restarted again, "
                         "as maximum restart count is reached: %s", container_name, self.params.restart_limit)
@@ -95,7 +98,10 @@ class RestartService(Notifyable):
                 logger.info("Container %s became unhealthy, restarting...", container_name)
                 self.do_restart(event_details)
             else:
-                logger.info("Container %s became unhealthy, skipping restart as per configuration", container_name)
+                logger.info("Container %s became unhealthy, skipping restart but sending mail, as per configuration!",
+                            container_name)
+                self.notification_service.send_mail("Container %s became unhealthy" % container_name,
+                                                    json.dumps(event_details))
 
     def log_restart_container(self, container_name):
         count_of_restarts = self.get_performed_restart_count(container_name)

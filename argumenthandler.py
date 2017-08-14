@@ -39,9 +39,9 @@ class ArgumentHandler:
         # manual kill won't restart
         restart_group = parser.add_mutually_exclusive_group()
         restart_group.add_argument('--restart-containers-on-die', dest='restart_containers_on_die', action='store_true')
-        restart_group.add_argument('--do-not-restart-containers-on-die', dest='restart_containers_on_die',
-                                   action='store_false')
-        parser.set_defaults(restart_containers_on_die=True)
+        restart_group.add_argument('--restart-containers-on-die', dest='restart_containers_on_die',
+                                   action='store_true')
+        parser.set_defaults(restart_containers_on_die=False)
 
         restart_options_group = parser.add_argument_group('Restart options')
         restart_options_group.add_argument('--restart-limit', default=3,
