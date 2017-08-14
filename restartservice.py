@@ -71,8 +71,8 @@ class RestartService:
                 if self.check_container_is_restartable(container_name) \
                         and self.check_restart_needed(container_name, parsed_json):
                     restart_logger.info("Container %s became unhealthy, restarting...", container_name)
-                self.maintain_container_restarts(container_name)
-                self.do_restart(parsed_json)
+                    self.maintain_container_restarts(container_name)
+                    self.do_restart(parsed_json)
 
     def check_restart_needed(self, container_name, parsed_json):
         docker_events = self.captured_events[container_name]
