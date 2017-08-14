@@ -173,10 +173,7 @@ if __name__ == '__main__':
     import yaml
     import subprocess
 
-    def setup_logging(
-            default_path='logging.yaml',
-            default_level=logging.INFO,
-            env_key='LOG_CFG'):
+    def setup_logging(default_path='logging.yaml', default_level=logging.INFO, env_key='LOG_CFG'):
         """Setup logging configuration
 
         """
@@ -192,7 +189,6 @@ if __name__ == '__main__':
             logging.basicConfig(level=default_level)
 
 
-    @staticmethod
     def get_callbacks(args, restart_service):
         callbacks = []
 
