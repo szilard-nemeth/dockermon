@@ -24,6 +24,34 @@ class RestartParameters:
         self.reset_period = args.restart_reset_period
         self.containers_to_restart = args.containers_to_restart
 
+class RestartData:
+    def __init__(self, container_name, timestamp=None):
+        self.container_name = container_name
+        self.mail_sent = False
+        if timestamp:
+            self.occasions = [timestamp]
+            self.formatted_occasions = [DateHelper.format_timestamp(timestamp)]
+        else:
+            self.occasions = []
+            self.formatted_occasions = []
+
+    def add_restart_occasion(self, timestamp):
+        self.occasions.append(timestamp)
+        self.formatted_occasions.append(DateHelper.format_timestamp(timestamp))
+
+    def __str__(self):
+        return "container_name: %s, occasions: %s, formatted_occasions: %s" \
+               % (self.container_name, self.occasions, self.formatted_occasions)
+
+
+class DateHelper:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def format_timestamp(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
 
 class RestartService:
     def __init__(self, socket_url, restart_params, notification_service):
@@ -200,7 +228,6 @@ class RestartService:
         restart_logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
                             container_name, container_id, compose_service_name)
         request = self.create_docker_restart_request(container_id, hostname)
-
         self.handle_restart_request(request, sock, container_name, json.dumps(parsed_json))
 
     def handle_restart_request(self, request, sock, container_name, mail_content):
@@ -216,32 +243,3 @@ class RestartService:
                 self.notification_service.send_mail(log_record, mail_content)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
-
-
-class RestartData:
-    def __init__(self, container_name, timestamp=None):
-        self.container_name = container_name
-        self.mail_sent = False
-        if timestamp:
-            self.occasions = [timestamp]
-            self.formatted_occasions = [DateHelper.format_timestamp(timestamp)]
-        else:
-            self.occasions = []
-            self.formatted_occasions = []
-
-    def add_restart_occasion(self, timestamp):
-        self.occasions.append(timestamp)
-        self.formatted_occasions.append(DateHelper.format_timestamp(timestamp))
-
-    def __str__(self):
-        return "container_name: %s, occasions: %s, formatted_occasions: %s" \
-               % (self.container_name, self.occasions, self.formatted_occasions)
-
-
-class DateHelper:
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def format_timestamp(timestamp):
-        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
