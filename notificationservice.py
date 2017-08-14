@@ -9,7 +9,6 @@ restart_logger = logging.getLogger('dockermon-restart')
 
 
 class NotificationService:
-
     def __init__(self, args):
         self.mail_recipients = NotificationService.get_mail_recipients(args)
         self.mail_hostname = NotificationService.get_mail_hostname()

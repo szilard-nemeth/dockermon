@@ -13,6 +13,7 @@ import logging.config
 import socket
 from argumenthandler import ArgumentHandler
 import notificationservice
+from eventbroadcaster import EventBroadcaster
 from restartservice import RestartService, DateHelper, RestartParameters
 
 if version_info[:2] < (3, 0):
@@ -47,9 +48,13 @@ class DockerEvent:
 
 
 class DockerMon:
-    event_types_to_watch = ['die', 'stop', 'kill', 'start']
+    def __init__(self, callbacks, url=default_sock_url):
+        self.url = url
+        self.callbacks = callbacks
+        self.event_broadcaster = EventBroadcaster()
 
-    def __init__(self):
+    def register_listener(self, listener):
+        self.event_broadcaster.register(listener)
         pass
 
     @staticmethod
@@ -95,13 +100,12 @@ class DockerMon:
         sock.connect(netloc)
         return sock, hostname
 
-    @staticmethod
-    def watch(callbacks, url=default_sock_url):
+    def watch(self):
         """Watch docker events. Will call callback with each new event (dict).
 
             url can be either tcp://<host>:port or ipc://<path>
         """
-        sock, hostname = DockerMon.connect(url)
+        sock, hostname = DockerMon.connect(self.url)
         request = 'GET /events HTTP/1.1\nHost: %s\n\n' % hostname
         request = request.encode('utf-8')
 
@@ -130,11 +134,12 @@ class DockerMon:
                 if len(data) < start + size + 2:
                     continue
                 payload = data[start:start + size]
-                parsed_json = json.loads(payload)
+                event_details = json.loads(payload)
+                self.event_broadcaster.broadcast_event(event_details)
 
                 if callbacks:
                     for callback in callbacks:
-                        callback(parsed_json)
+                        callback(event_details)
 
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
 
@@ -150,24 +155,6 @@ class DockerMon:
         data = json.dumps(msg)
         pipe.stdin.write(data.encode('utf-8'))
         pipe.stdin.close()
-
-    @staticmethod
-    def event_max_age_in_seconds(ev, max_age_in_seconds, now):
-        age_in_seconds = now - ev.time
-        if age_in_seconds <= max_age_in_seconds:
-            return True
-
-    @staticmethod
-    def event_type_matches(ev, event_type):
-        if ev.type == event_type:
-            return True
-
-    @staticmethod
-    def event_type_matches_one_of(ev, event_types):
-        for ev_type in event_types:
-            if ev.type == ev_type:
-                return True
-        return False
 
 
 if __name__ == '__main__':
@@ -197,11 +184,8 @@ if __name__ == '__main__':
         return arg_handler.get_args()
 
 
-    def get_callbacks(args, restart_service_callback):
+    def get_callbacks(args):
         callbacks = []
-
-        if args.restart_containers_on_die:
-            callbacks.append(restart_service_callback)
         if not args.do_not_print_events:
             callbacks.append(DockerMon.print_callback)
         if args.prog:
@@ -219,10 +203,12 @@ if __name__ == '__main__':
         raise SystemExit
 
     notification_service = notificationservice.NotificationService(args)
+    callbacks = get_callbacks(args)
+    dockermon = DockerMon(callbacks, args.socket_url)
     restart_params = RestartParameters(args)
     restart_service = RestartService(args.socket_url, restart_params, notification_service)
-    callbacks = get_callbacks(args, restart_service.handle_docker_event)
+    dockermon.register_listener(restart_service)
     try:
-        DockerMon.watch(callbacks, args.socket_url)
+        dockermon.watch()
     except (KeyboardInterrupt, EOFError):
         pass

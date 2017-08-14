@@ -6,15 +6,14 @@ import datetime
 from dockermon import DockerMon, DockermonError, DockerEvent
 from sys import version_info
 
+from notifyable import Notifyable
+
 if version_info[:2] < (3, 0):
-    from httplib import OK as HTTP_OK
     from httplib import NO_CONTENT as HTTP_NO_CONTENT
-    from urlparse import urlparse
 else:
     from http.client import OK as HTTP_OK
-    from urllib.parse import urlparse
 
-restart_logger = logging.getLogger('dockermon-restart')
+logger = logging.getLogger(__name__)
 
 
 class RestartParameters:
@@ -23,6 +22,7 @@ class RestartParameters:
         self.limit = args.restart_limit
         self.reset_period = args.restart_reset_period
         self.containers_to_restart = args.containers_to_restart
+        self.do_restart = args.restart_containers_on_die
 
 
 class RestartData:
@@ -54,88 +54,54 @@ class DateHelper:
         return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
 
-class RestartService:
+class RestartService(Notifyable):
     def __init__(self, socket_url, restart_params, notification_service):
+        Notifyable.__init__(self)
         self.socket_url = socket_url
         self.params = restart_params
         self.notification_service = notification_service
-
-        self.captured_events = {}
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
         self.restarts = {}
 
-    def handle_docker_event(self, parsed_json):
-        if "status" in parsed_json:
-            event_status = parsed_json['status']
-            container_name = parsed_json['Actor']['Attributes']["name"]
-            event_time = parsed_json['time']
+    def container_started(self, container_name, event_details):
+        self.maintain_container_restart_counter(container_name)
 
-            if event_status in DockerMon.event_types_to_watch:
-                docker_event = DockerEvent(event_status, container_name, event_time)
-                self.save_docker_event(docker_event)
-                if event_status == 'start':
-                    self.maintain_container_restarts(container_name)
-                elif self.check_container_is_restartable(container_name) and \
-                        self.check_restart_needed(container_name, parsed_json):
-                    restart_logger.info("Container %s dead unexpectedly, restarting...", container_name)
-                    self.do_restart(parsed_json)
+    def container_became_healthy(self, container_name, event_details):
+        self.maintain_container_restart_counter(container_name)
 
-            # restart immediately if container is unhealthy
-            elif "health_status: unhealthy" in event_status:
-                docker_event = DockerEvent(event_status, container_name, event_time)
-                self.save_docker_event(docker_event)
-                if self.check_container_is_restartable(container_name) \
-                        and self.check_restart_needed(container_name, parsed_json):
-                    restart_logger.info("Container %s became unhealthy, restarting...", container_name)
-                    self.maintain_container_restarts(container_name)
-                    self.do_restart(parsed_json)
+    def container_stopped_by_hand(self, container_name, event_details):
+        logger.debug("Container %s is stopped/killed, but WILL NOT BE restarted "
+                     "as it was stopped/killed by hand", container_name)
 
-    def check_restart_needed(self, container_name, parsed_json):
-        docker_events = self.captured_events[container_name]
-
-        if not docker_events:
-            return False
-
-        now = time.time()
-        die_events = filter(lambda e: DockerMon.event_type_matches(e, 'die'), docker_events)
-        die_events = filter(lambda e: DockerMon.event_max_age_in_seconds(e, 5, now), die_events)
-
-        if die_events:
-            stop_or_kill_events = filter(lambda e: DockerMon.event_type_matches_one_of(e, ['stop', 'kill']),
-                                         docker_events)
-            stop_or_kill_events = filter(lambda e: DockerMon.event_max_age_in_seconds(e, 12, now), stop_or_kill_events)
-
-            if stop_or_kill_events:
-                RestartService.log_stopped_killed_by_hand(container_name)
-                return False
+    def container_dead(self, container_name, event_details):
+        if self.is_restart_allowed(container_name) and self.check_container_is_restartable(container_name):
+            if self.params.do_restart:
+                logger.info("Container %s dead unexpectedly, restarting...", container_name)
+                self.do_restart(event_details)
             else:
-                if self.is_restart_allowed(container_name):
-                    return True
-                else:
-                    RestartService.log_will_not_restart(container_name)
-                    if not self.is_mail_sent(container_name):
-                        subject = "Maximum restart count is reached for container %s" % container_name
-                        self.notification_service.send_mail(subject, json.dumps(parsed_json))
-                        self.set_mail_sent(container_name)
+                logger.info("Container %s dead unexpectedly, skipping restart as per configuration", container_name)
         else:
-            return False
+            logger.warn("Container %s is stopped/killed, but WILL NOT BE restarted again, "
+                        "as maximum restart count is reached: %s", container_name, self.params.restart_limit)
+            if not self.is_mail_sent(container_name):
+                mail_subject = "Maximum restart count is reached for container %s" % container_name
+                self.notification_service.send_mail(mail_subject, json.dumps(event_details))
+                self.set_mail_sent(container_name)
+            pass
 
-    @staticmethod
-    def log_stopped_killed_by_hand(container_name):
-        restart_logger.debug(
-            "Container %s is stopped/killed, but WILL NOT BE restarted as it was stopped/killed by hand",
-            container_name)
-
-    def log_will_not_restart(self, container_name):
-        restart_logger.warn(
-            "Container %s is stopped/killed, but WILL NOT BE restarted again, as maximum restart count is reached: %s",
-            container_name, self.params.restart_limit)
+    def container_became_unhealthy(self, container_name, event_details):
+        if self.is_restart_allowed(container_name) and self.check_container_is_restartable(container_name):
+            if self.params.do_restart:
+                logger.info("Container %s became unhealthy, restarting...", container_name)
+                self.do_restart(event_details)
+            else:
+                logger.info("Container %s became unhealthy, skipping restart as per configuration", container_name)
 
     def log_restart_container(self, container_name):
         count_of_restarts = self.get_performed_restart_count(container_name)
         log_record = "Restarting container: %s (%s / %s)..." % (
             container_name, count_of_restarts, self.params.restart_limit)
-        restart_logger.info(log_record)
+        logger.info(log_record)
         return log_record
 
     def is_mail_sent(self, container_name):
@@ -144,7 +110,7 @@ class RestartService:
     def set_mail_sent(self, container_name):
         self.restarts[container_name].mail_sent = True
 
-    def save_restart_occasion(self, container_name):
+    def save_restart_event_happened(self, container_name):
         now = time.time()
         if container_name not in self.restarts:
             self.restarts[container_name] = RestartData(container_name, now)
@@ -164,20 +130,20 @@ class RestartService:
         if container_name in self.cached_container_names['restart']:
             return True
         elif container_name in self.cached_container_names['do_not_restart']:
-            restart_logger.debug("Container %s is stopped/killed, "
-                                 "but WILL NOT BE restarted as it does not match any names from configuration "
-                                 "'containers-to-restart'.", container_name)
+            logger.debug("Container %s is stopped/killed, "
+                         "but WILL NOT BE restarted as it does not match any names from configuration "
+                         "'containers-to-restart'.", container_name)
             return False
         else:
             for pattern in self.params.containers_to_restart:
                 if pattern.match(container_name):
-                    restart_logger.debug("Container %s is matched for container name pattern %s", container_name,
-                                         pattern.pattern)
+                    logger.debug("Container %s is matched for container name pattern %s", container_name,
+                                 pattern.pattern)
                     self.cached_container_names['restart'].append(container_name)
                     return True
-            restart_logger.debug("Container %s is stopped/killed, "
-                                 "but WILL NOT BE restarted as it does not match any names from configuration "
-                                 "'containers-to-restart'.", container_name)
+            logger.debug("Container %s is stopped/killed, "
+                         "but WILL NOT BE restarted as it does not match any names from configuration "
+                         "'containers-to-restart'.", container_name)
             self.cached_container_names['do_not_restart'].append(container_name)
             return False
 
@@ -193,7 +159,7 @@ class RestartService:
 
         return restart_count < self.params.restart_limit
 
-    def maintain_container_restarts(self, container_name):
+    def maintain_container_restart_counter(self, container_name):
         if container_name not in self.restarts:
             return
         last_restart = self.restarts[container_name].occasions[-1]
@@ -202,9 +168,9 @@ class RestartService:
         needs_counter_reset = restart_duration < self.params.restart_reset_period * 60
 
         if needs_counter_reset:
-            restart_logger.info("Start/healthy event received for container %s, clearing restart counter...",
-                                container_name)
-            restart_logger.info("Last restart time was %s", DateHelper.format_timestamp(last_restart))
+            logger.info("Start/healthy event received for container %s, clearing restart counter...",
+                        container_name)
+            logger.info("Last restart time was %s", DateHelper.format_timestamp(last_restart))
             self.reset_restart_data(container_name)
 
     def do_restart(self, parsed_json):
@@ -213,8 +179,8 @@ class RestartService:
         compose_service_name = parsed_json['Actor']['Attributes']["com.docker.compose.service"]
 
         sock, hostname = DockerMon.connect(self.socket_url)
-        restart_logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
-                            container_name, container_id, compose_service_name)
+        logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
+                    container_name, container_id, compose_service_name)
         request = self.create_docker_restart_request(container_id, hostname)
         self.handle_restart_request(request, sock, container_name, json.dumps(parsed_json))
 
@@ -226,7 +192,7 @@ class RestartService:
 
             # checking the HTTP status, no payload should be received!
             if status == HTTP_NO_CONTENT:
-                self.save_restart_occasion(container_name)
+                self.save_restart_event_happened(container_name)
                 log_record = self.log_restart_container(container_name)
                 self.notification_service.send_mail(log_record, mail_content)
             else:
@@ -237,10 +203,3 @@ class RestartService:
         request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
         request = request.encode('utf-8')
         return request
-
-    def save_docker_event(self, event):
-        container_name = event.container_name
-        if container_name not in self.captured_events:
-            self.captured_events[container_name] = []
-
-        self.captured_events[container_name].append(event)
