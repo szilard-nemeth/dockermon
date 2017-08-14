@@ -24,6 +24,7 @@ class RestartParameters:
         self.reset_period = args.restart_reset_period
         self.containers_to_restart = args.containers_to_restart
 
+
 class RestartData:
     def __init__(self, container_name, timestamp=None):
         self.container_name = container_name
@@ -62,19 +63,6 @@ class RestartService:
         self.captured_events = {}
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
         self.restarts = {}
-
-    @staticmethod
-    def create_docker_restart_request(container_id, hostname):
-        request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
-        request = request.encode('utf-8')
-        return request
-
-    def save_docker_event(self, event):
-        container_name = event.container_name
-        if container_name not in self.captured_events:
-            self.captured_events[container_name] = []
-
-        self.captured_events[container_name].append(event)
 
     def handle_docker_event(self, parsed_json):
         if "status" in parsed_json:
@@ -243,3 +231,16 @@ class RestartService:
                 self.notification_service.send_mail(log_record, mail_content)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
+
+    @staticmethod
+    def create_docker_restart_request(container_id, hostname):
+        request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
+        request = request.encode('utf-8')
+        return request
+
+    def save_docker_event(self, event):
+        container_name = event.container_name
+        if container_name not in self.captured_events:
+            self.captured_events[container_name] = []
+
+        self.captured_events[container_name].append(event)
