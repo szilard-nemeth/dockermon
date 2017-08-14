@@ -188,6 +188,13 @@ if __name__ == '__main__':
         else:
             logging.basicConfig(level=default_level)
 
+    def get_args():
+        interpolate_script_filename = "/interpolate-env-vars.sh"
+        if os.path.isfile(interpolate_script_filename):
+            subprocess.check_call(interpolate_script_filename)
+        arg_handler = ArgumentHandler()
+        return arg_handler.get_args()
+
 
     def get_callbacks(args, restart_service):
         callbacks = []
@@ -204,12 +211,7 @@ if __name__ == '__main__':
 
 
     setup_logging()
-    interpolate_script_filename = "/interpolate-env-vars.sh"
-    if os.path.isfile(interpolate_script_filename):
-        subprocess.check_call(interpolate_script_filename)
-
-    arg_handler = ArgumentHandler()
-    args = arg_handler.get_args()
+    args = get_args()
 
     if args.version:
         logger.info('dockermon %s', __version__)
