@@ -49,8 +49,7 @@ class DockerEvent:
 class DockerMon:
     event_types_to_watch = ['die', 'stop', 'kill', 'start']
 
-    def __init__(self, notification_service, restart_service):
-        self.notification_service = notification_service
+    def __init__(self, restart_service):
         self.restart_service = restart_service
 
     @staticmethod
@@ -219,7 +218,7 @@ if __name__ == '__main__':
     restart_params = RestartParameters(args)
 
     restart_service = RestartService(args.socket_url, args.containers_to_restart, notification_service)
-    dockermon = DockerMon(notification_service, restart_service)
+    dockermon = DockerMon(restart_service)
     try:
         if args.restart_containers_on_die:
             dockermon.watch(callback, args.socket_url, restart_callback=restart_service.handle_docker_event)
