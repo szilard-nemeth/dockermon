@@ -1,7 +1,17 @@
 import time
-
-from dockermon import DockerEvent
 from notifyable import Notifyable
+
+
+class DockerEvent:
+    def __init__(self, event_type, container_name, timestamp):
+        self.type = event_type
+        self.container_name = container_name
+        self.time = timestamp
+        self.formatted_time = DateHelper.format_timestamp(timestamp)
+
+    def __str__(self):
+        return "type: %s, container_name: %s, time: %s, formatted_time: %s" \
+               % (self.type, self.container_name, self.time, self.formatted_time)
 
 
 class EventBroadcaster:

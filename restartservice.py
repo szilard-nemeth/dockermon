@@ -2,8 +2,7 @@ from contextlib import closing
 import json
 import logging
 import time
-import datetime
-from dockermon import DockerMon, DockermonError, DockerEvent
+from dockermon import DockerMon, DockermonError
 from sys import version_info
 
 from notifyable import Notifyable
@@ -43,15 +42,6 @@ class RestartData:
     def __str__(self):
         return "container_name: %s, occasions: %s, formatted_occasions: %s" \
                % (self.container_name, self.occasions, self.formatted_occasions)
-
-
-class DateHelper:
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def format_timestamp(timestamp):
-        return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
 
 
 class RestartService(Notifyable):
@@ -180,6 +170,7 @@ class RestartService(Notifyable):
             self.reset_restart_data(container_name)
 
     def do_restart(self, parsed_json):
+        import dockermon
         container_id = parsed_json['id']
         container_name = parsed_json['Actor']['Attributes']["name"]
         compose_service_name = parsed_json['Actor']['Attributes']["com.docker.compose.service"]

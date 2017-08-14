@@ -14,7 +14,6 @@ import socket
 from argumenthandler import ArgumentHandler
 import notificationservice
 from eventbroadcaster import EventBroadcaster
-from restartservice import RestartService, DateHelper, RestartParameters
 
 if version_info[:2] < (3, 0):
     from httplib import OK as HTTP_OK
@@ -33,18 +32,6 @@ restart_logger = logging.getLogger('dockermon-restart')
 
 class DockermonError(Exception):
     pass
-
-
-class DockerEvent:
-    def __init__(self, event_type, container_name, timestamp):
-        self.type = event_type
-        self.container_name = container_name
-        self.time = timestamp
-        self.formatted_time = DateHelper.format_timestamp(timestamp)
-
-    def __str__(self):
-        return "type: %s, container_name: %s, time: %s, formatted_time: %s" \
-               % (self.type, self.container_name, self.time, self.formatted_time)
 
 
 class DockerMon:
@@ -160,6 +147,7 @@ class DockerMon:
 if __name__ == '__main__':
     import yaml
     import subprocess
+    from restartservice import RestartService, RestartParameters
 
     def setup_logging(default_path='logging.yaml', default_level=logging.INFO, env_key='LOG_CFG'):
         """Setup logging configuration
