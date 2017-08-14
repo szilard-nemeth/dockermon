@@ -49,8 +49,8 @@ class DockerEvent:
 class DockerMon:
     event_types_to_watch = ['die', 'stop', 'kill', 'start']
 
-    def __init__(self, restart_service):
-        self.restart_service = restart_service
+    def __init__(self):
+        pass
 
     @staticmethod
     def read_http_header(sock):
@@ -95,7 +95,8 @@ class DockerMon:
         sock.connect(netloc)
         return sock, hostname
 
-    def watch(self, callbacks, url=default_sock_url):
+    @staticmethod
+    def watch(callbacks, url=default_sock_url):
         """Watch docker events. Will call callback with each new event (dict).
 
             url can be either tcp://<host>:port or ipc://<path>
@@ -196,11 +197,11 @@ if __name__ == '__main__':
         return arg_handler.get_args()
 
 
-    def get_callbacks(args, restart_service):
+    def get_callbacks(args, restart_service_callback):
         callbacks = []
 
         if args.restart_containers_on_die:
-            callbacks.append(restart_service.handle_docker_event)
+            callbacks.append(restart_service_callback)
         if not args.do_not_print_events:
             callbacks.append(DockerMon.print_callback)
         if args.prog:
@@ -220,9 +221,8 @@ if __name__ == '__main__':
     notification_service = notificationservice.NotificationService(args)
     restart_params = RestartParameters(args)
     restart_service = RestartService(args.socket_url, restart_params, notification_service)
-    callbacks = get_callbacks(args, restart_service)
-    dockermon = DockerMon(restart_service)
+    callbacks = get_callbacks(args, restart_service.handle_docker_event)
     try:
-        dockermon.watch(callbacks, args.socket_url)
+        DockerMon.watch(callbacks, args.socket_url)
     except (KeyboardInterrupt, EOFError):
         pass
