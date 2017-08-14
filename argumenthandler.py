@@ -39,8 +39,6 @@ class ArgumentHandler:
         # manual kill won't restart
         restart_group = parser.add_mutually_exclusive_group()
         restart_group.add_argument('--restart-containers-on-die', dest='restart_containers_on_die', action='store_true')
-        restart_group.add_argument('--restart-containers-on-die', dest='restart_containers_on_die',
-                                   action='store_true')
         parser.set_defaults(restart_containers_on_die=False)
 
         restart_options_group = parser.add_argument_group('Restart options')
@@ -57,18 +55,18 @@ class ArgumentHandler:
                                            help='Minutes to wait to reset restart counter for containers',
                                            action='store')
         # default=['*'] appended the given arguments to the default which is not the desired behavior
-        restart_options_group.add_argument('--containers-to-restart', default=None,
-                                           dest='containers_to_restart',
-                                           help='Restart only specified containers, defaults to all containers',
+        restart_options_group.add_argument('--containers-to-watch', default=None,
+                                           dest='containers_to_watch',
+                                           help='Watch / Restart only specified containers, defaults to all containers',
                                            action='store')
 
         notification_options_group = parser.add_argument_group('Notification options')
-        notification_options_group.add_argument('--restart-notification-email-addresses-path', default=None,
-                                                dest='restart_notification_email_addresses_path',
+        notification_options_group.add_argument('--notification-email-addresses-path', default=None,
+                                                dest='notification_email_addresses_path',
                                                 help='Send mail notifications of container restarts to the addresses from the specified file',
                                                 action='store')
-        notification_options_group.add_argument('--restart-notification-email-server', default=None,
-                                                dest='restart_notification_email_server',
+        notification_options_group.add_argument('---notification-email-server', default=None,
+                                                dest='notification_email_server',
                                                 help='Mail server for container restart email notifications',
                                                 action='store')
 
@@ -77,7 +75,7 @@ class ArgumentHandler:
     @staticmethod
     def parse_args(parser):
         args = parser.parse_args()
-        args.containers_to_restart = []
+        args.containers_to_watch = []
         if args.config_file:
             logger.info("Using config file %s", args.config_file.name)
             data = yaml.load(args.config_file)
@@ -99,21 +97,21 @@ class ArgumentHandler:
                     arg_dict[key] = value
 
         # initialize list if empty
-        if not args.containers_to_restart:
-            args.containers_to_restart = ['.*']
+        if not args.containers_to_watch:
+            args.containers_to_watch = ['.*']
         else:
-            args.containers_to_restart = ArgumentHandler.convert_containers_to_restart(args.containers_to_restart)
+            args.containers_to_watch = ArgumentHandler.convert_containers_to_watch(args.containers_to_watch)
 
-        if not args.restart_notification_email_server:
+        if not args.notification_email_server:
             raise SystemExit('Container restart notifications email server is not defined, exiting...')
         logger.debug("Command line arguments after processing: %s", pprint.pformat(args))
         return args
 
     @staticmethod
-    def convert_containers_to_restart(containers_to_restart):
+    def convert_containers_to_watch(containers):
         result = []
-        logger.info("Converting 'containers-to-restart' arguments to regex patterns: %s", containers_to_restart)
-        for container in containers_to_restart:
+        logger.info("Converting 'containers-to-watch' arguments to regex patterns: %s", containers)
+        for container in containers:
             if '*' in container:
                 container = container.replace('*', '.*')
             compiled_regex = re.compile(container)

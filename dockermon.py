@@ -166,7 +166,10 @@ if __name__ == '__main__':
 
     def get_args():
         interpolate_script_filename = "/interpolate-env-vars.sh"
-        if os.path.isfile(interpolate_script_filename):
+        if not os.path.isfile(interpolate_script_filename):
+            pass
+            #raise SystemExit('Cannot interpolate env vars in config.yml, file not found in %s' % interpolate_script_filename)
+        else:
             subprocess.check_call(interpolate_script_filename)
         arg_handler = ArgumentHandler()
         return arg_handler.get_args()

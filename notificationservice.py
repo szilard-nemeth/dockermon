@@ -34,8 +34,8 @@ class NotificationService:
 
     @staticmethod
     def get_mail_recipients(args):
-        recipient_list_file = args.restart_notification_email_addresses_path
-        if not args.restart_notification_email_addresses_path:
+        recipient_list_file = args.notification_email_addresses_path
+        if not args.notification_email_addresses_path:
             raise SystemExit('Container restart notifications email recipient list file path is not provided, exiting...')
         elif not os.path.exists(recipient_list_file):
             raise SystemExit('Container restart notifications email recipient list file %s is not found or not readable, exiting...' % recipient_list_file)
@@ -67,4 +67,4 @@ class NotificationService:
 
     @staticmethod
     def get_mail_server_address(args):
-        return args.restart_notification_email_server if args.restart_notification_email_server else socket.gethostname()
+        return args.notification_email_server if args.notification_email_server else socket.gethostname()

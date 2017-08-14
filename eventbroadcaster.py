@@ -1,4 +1,6 @@
 import time
+
+from datehelper import DateHelper
 from notifyable import Notifyable
 
 
@@ -98,7 +100,7 @@ class EventBroadcaster:
         if not die_events:
             return False
 
-        stop_or_kill_events = self.get_stop_or_kill_events_from_last_period(docker_events)
+        stop_or_kill_events = self.get_stop_or_kill_events_from_last_period(container_name)
         if stop_or_kill_events:
             return False
         else:

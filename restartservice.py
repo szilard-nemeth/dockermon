@@ -2,6 +2,8 @@ from contextlib import closing
 import json
 import logging
 import time
+
+from datehelper import DateHelper
 from dockermon import DockerMon, DockermonError
 from sys import version_info
 
@@ -17,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 class RestartParameters:
     def __init__(self, args):
-        self.threshold = args.restart_threshold
-        self.limit = args.restart_limit
-        self.reset_period = args.restart_reset_period
-        self.containers_to_restart = args.containers_to_restart
+        self.restart_threshold = args.restart_threshold
+        self.restart_limit = args.restart_limit
+        self.restart_reset_period = args.restart_reset_period
+        self.containers_to_watch = args.containers_to_watch
         self.do_restart = args.restart_containers_on_die
 
 
@@ -128,10 +130,10 @@ class RestartService(Notifyable):
         elif container_name in self.cached_container_names['do_not_restart']:
             logger.debug("Container %s is stopped/killed, "
                          "but WILL NOT BE restarted as it does not match any names from configuration "
-                         "'containers-to-restart'.", container_name)
+                         "'containers-to-watch'.", container_name)
             return False
         else:
-            for pattern in self.params.containers_to_restart:
+            for pattern in self.params.containers_to_watch:
                 if pattern.match(container_name):
                     logger.debug("Container %s is matched for container name pattern %s", container_name,
                                  pattern.pattern)
@@ -139,7 +141,7 @@ class RestartService(Notifyable):
                     return True
             logger.debug("Container %s is stopped/killed, "
                          "but WILL NOT BE restarted as it does not match any names from configuration "
-                         "'containers-to-restart'.", container_name)
+                         "'containers-to-watch'.", container_name)
             self.cached_container_names['do_not_restart'].append(container_name)
             return False
 
@@ -170,7 +172,6 @@ class RestartService(Notifyable):
             self.reset_restart_data(container_name)
 
     def do_restart(self, parsed_json):
-        import dockermon
         container_id = parsed_json['id']
         container_name = parsed_json['Actor']['Attributes']["name"]
         compose_service_name = parsed_json['Actor']['Attributes']["com.docker.compose.service"]
