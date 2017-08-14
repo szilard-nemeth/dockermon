@@ -7,3 +7,5 @@ dockermon.egg-info
 .tox
 .eggs
 README.html
+.idea
+dockermon.iml

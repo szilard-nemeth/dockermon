@@ -28,9 +28,10 @@ class RestartParameters:
 class RestartService:
     def __init__(self, socket_url, restart_params, notification_service):
         self.socket_url = socket_url
-        self.event_dict = {}
         self.params = restart_params
         self.notification_service = notification_service
+
+        self.event_dict = {}
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
         self.restarts = {}
 

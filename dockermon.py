@@ -95,7 +95,7 @@ class DockerMon:
         sock.connect(netloc)
         return sock, hostname
 
-    def watch(self, callback, url=default_sock_url, restart_callback=None):
+    def watch(self, callbacks, url=default_sock_url):
         """Watch docker events. Will call callback with each new event (dict).
 
             url can be either tcp://<host>:port or ipc://<path>
@@ -129,16 +129,13 @@ class DockerMon:
                 if len(data) < start + size + 2:
                     continue
                 payload = data[start:start + size]
-
                 parsed_json = json.loads(payload)
-                if callback:
-                    callback(parsed_json)
 
-                if restart_callback:
-                    self.restart_service.handle_docker_event(parsed_json)
+                if callbacks:
+                    for callback in callbacks:
+                        callback(parsed_json)
 
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
-
 
     @staticmethod
     def print_callback(msg):
@@ -194,6 +191,22 @@ if __name__ == '__main__':
         else:
             logging.basicConfig(level=default_level)
 
+
+    @staticmethod
+    def get_callbacks(args, restart_service):
+        callbacks = []
+
+        if args.restart_containers_on_die:
+            callbacks.append(restart_service.handle_docker_event)
+        if not args.do_not_print_events:
+            callbacks.append(DockerMon.print_callback)
+        if args.prog:
+            prog = shlex.split(args.prog)
+            callbacks.append(partial(DockerMon.prog_callback, prog))
+
+        return callbacks
+
+
     setup_logging()
     interpolate_script_filename = "/interpolate-env-vars.sh"
     if os.path.isfile(interpolate_script_filename):
@@ -201,28 +214,17 @@ if __name__ == '__main__':
 
     arg_handler = ArgumentHandler()
     args = arg_handler.get_args()
-    notification_service = notificationservice.NotificationService(args)
 
     if args.version:
         logger.info('dockermon %s', __version__)
         raise SystemExit
 
-    if args.do_not_print_events:
-        callback = None
-    elif args.prog:
-        prog = shlex.split(args.prog)
-        callback = partial(DockerMon.prog_callback, prog)
-    else:
-        callback = DockerMon.print_callback
-
+    notification_service = notificationservice.NotificationService(args)
     restart_params = RestartParameters(args)
-
-    restart_service = RestartService(args.socket_url, args.containers_to_restart, notification_service)
+    restart_service = RestartService(args.socket_url, restart_params, notification_service)
+    callbacks = get_callbacks(args, restart_service)
     dockermon = DockerMon(restart_service)
     try:
-        if args.restart_containers_on_die:
-            dockermon.watch(callback, args.socket_url, restart_callback=restart_service.handle_docker_event)
-        else:
-            dockermon.watch(callback, args.socket_url)
+        dockermon.watch(callbacks, args.socket_url)
     except (KeyboardInterrupt, EOFError):
         pass
