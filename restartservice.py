@@ -31,16 +31,22 @@ class RestartService:
         self.params = restart_params
         self.notification_service = notification_service
 
-        self.event_dict = {}
+        self.captured_events = {}
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
         self.restarts = {}
 
+    @staticmethod
+    def create_docker_restart_request(container_id, hostname):
+        request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
+        request = request.encode('utf-8')
+        return request
+
     def save_docker_event(self, event):
         container_name = event.container_name
-        if container_name not in self.event_dict:
-            self.event_dict[container_name] = []
+        if container_name not in self.captured_events:
+            self.captured_events[container_name] = []
 
-        self.event_dict[container_name].append(event)
+        self.captured_events[container_name].append(event)
 
     def handle_docker_event(self, parsed_json):
         if "status" in parsed_json:
@@ -69,7 +75,7 @@ class RestartService:
                 self.do_restart(parsed_json)
 
     def check_restart_needed(self, container_name, parsed_json):
-        docker_events = self.event_dict[container_name]
+        docker_events = self.captured_events[container_name]
 
         if not docker_events:
             return False
@@ -108,6 +114,13 @@ class RestartService:
         restart_logger.warn(
             "Container %s is stopped/killed, but WILL NOT BE restarted again, as maximum restart count is reached: %s",
             container_name, self.params.restart_limit)
+
+    def log_restart_container(self, container_name):
+        count_of_restarts = self.get_performed_restart_count(container_name)
+        log_record = "Restarting container: %s (%s / %s)..." % (
+            container_name, count_of_restarts, self.params.restart_limit)
+        restart_logger.info(log_record)
+        return log_record
 
     def is_mail_sent(self, container_name):
         return self.restarts[container_name].mail_sent
@@ -186,9 +199,11 @@ class RestartService:
         sock, hostname = DockerMon.connect(self.socket_url)
         restart_logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
                             container_name, container_id, compose_service_name)
-        request = 'POST /containers/{0}/restart?t=5 HTTP/1.1\nHost: {1}\n\n'.format(container_id, hostname)
-        request = request.encode('utf-8')
+        request = self.create_docker_restart_request(container_id, hostname)
 
+        self.handle_restart_request(request, sock, container_name, json.dumps(parsed_json))
+
+    def handle_restart_request(self, request, sock, container_name, mail_content):
         with closing(sock):
             sock.sendall(request)
             header, payload = DockerMon.read_http_header(sock)
@@ -197,11 +212,8 @@ class RestartService:
             # checking the HTTP status, no payload should be received!
             if status == HTTP_NO_CONTENT:
                 self.save_restart_occasion(container_name)
-                count_of_restarts = self.get_performed_restart_count(container_name)
-                log_record = "Restarting container: %s (%s / %s)..." % (
-                    container_name, count_of_restarts, self.params.restart_limit)
-                restart_logger.info(log_record)
-                self.notification_service.send_mail(log_record, json.dumps(parsed_json))
+                log_record = self.log_restart_container(container_name)
+                self.notification_service.send_mail(log_record, mail_content)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
 
