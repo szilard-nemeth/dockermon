@@ -4,4 +4,4 @@ restart-reset-period: 3
 containers-to-watch: ['*tracking-web*', '*tracking-public*', '*tracking-maintenance*', '*docforge*', '*mailcatcher*', '*tracking*nginx*']
 notification-email-addresses-path: /home/snemeth/dockermon/dockermon-email-recipients.list
 notification-email-server: smtp.gmail.com
-do-not-print-events: false
+print-all-events: false

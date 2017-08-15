@@ -4,4 +4,4 @@ restart-reset-period: ${RESTART_RESET_PERIOD}
 containers-to-watch: ${CONTAINERS_TO_WATCH}
 notification-email-addresses-path: ${NOTIFICATION_EMAIL_RECIPIENT_PATH}
 notification-email-server: ${NOTIFICATION_EMAIL_SERVER}
-do-not-print-events: ${DO_NOT_PRINT_EVENTS}
+print-all-events: ${PRINT_ALL_EVENTS}
