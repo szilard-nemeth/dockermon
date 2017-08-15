@@ -1,7 +1,11 @@
 import time
 
+import logging
+
 from datehelper import DateHelper
 from notifyable import Notifyable
+
+logger = logging.getLogger(__name__)
 
 
 class DockerEvent:
@@ -40,6 +44,10 @@ class EventBroadcaster:
         if age_in_seconds <= max_age_in_seconds:
             return True
 
+    @staticmethod
+    def log_propagate_event(event_type, container_name):
+        logger.debug('Propagating %s event for container: %s' % (event_type, container_name))
+
     def register(self, listener):
         if not isinstance(listener, Notifyable):
             raise TypeError("listener must be of type Notifyable")
@@ -51,24 +59,30 @@ class EventBroadcaster:
             self.captured_events[container_name] = []
 
         self.captured_events[container_name].append(event)
+        logger.debug('Saved docker event %s for container %s' % (event, container_name))
 
     def notify_container_started(self, container_name, event_details):
+        self.log_propagate_event('container-started', container_name)
         for listener in self.listeners:
             listener.container_started(container_name, event_details)
 
     def notify_container_became_healthy(self, container_name, event_details):
+        self.log_propagate_event('container-became-healthy', container_name)
         for listener in self.listeners:
             listener.container_became_healthy(container_name, event_details)
 
     def notify_container_stopped_by_hand(self, container_name, event_details):
+        self.log_propagate_event('container-stopped-by-hand', container_name)
         for listener in self.listeners:
             listener.container_stopped_by_hand(container_name, event_details)
 
     def notify_container_dead(self, container_name, event_details):
+        self.log_propagate_event('container-container-dead', container_name)
         for listener in self.listeners:
             listener.container_dead(container_name, event_details)
 
     def notify_container_became_unhealthy(self, container_name, event_details):
+        self.log_propagate_event('container-became-unhealthy', container_name)
         for listener in self.listeners:
             listener.container_became_unhealthy(container_name, event_details)
 
@@ -94,14 +108,19 @@ class EventBroadcaster:
     def check_notify_required(self, container_name):
         docker_events = self.captured_events[container_name]
         if not docker_events:
+            logger.debug('Skipped event propagation, container %s does not have saved events' % container_name)
             return False
 
         die_events = self.get_die_events_from_last_period(container_name)
         if not die_events:
+            logger.debug(
+                'Skipped event propagation, container %s does not die events from the last period' % container_name)
             return False
 
         stop_or_kill_events = self.get_stop_or_kill_events_from_last_period(container_name)
         if stop_or_kill_events:
+            logger.debug(
+                'Skipped event propagation, container %s does not stop/kill events from the last period' % container_name)
             return False
         else:
             return True

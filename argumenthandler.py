@@ -6,7 +6,7 @@ import argparse
 import pprint
 import yaml
 
-logger = logging.getLogger('argumenthandler')
+logger = logging.getLogger(__name__)
 default_sock_url = 'ipc:///var/run/docker.sock'
 
 

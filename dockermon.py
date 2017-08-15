@@ -27,7 +27,6 @@ bufsize = 1024
 default_sock_url = 'ipc:///var/run/docker.sock'
 
 logger = logging.getLogger('dockermon')
-restart_logger = logging.getLogger('dockermon-restart')
 
 
 class DockermonError(Exception):
@@ -133,7 +132,11 @@ class DockerMon:
     @staticmethod
     def print_callback(msg):
         """Print callback, prints message as info log as JSON in one line."""
-        logger.info(json.dumps(msg))
+        logger.debug('EVENT: %s' % json.dumps(msg))
+        event_type = msg['status']
+        container_name = msg['Actor']['Attributes']["name"]
+        compose_service_name = msg['Actor']['Attributes']["com.docker.compose.service"]
+        logger.info('EVENT:::event type: %s, container name: %s, compose service name: %s' % (event_type, container_name, compose_service_name))
 
     @staticmethod
     def prog_callback(prog, msg):

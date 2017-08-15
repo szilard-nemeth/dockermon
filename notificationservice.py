@@ -4,8 +4,7 @@ import smtplib
 from email.mime.text import MIMEText
 import socket
 
-logger = logging.getLogger('notification')
-restart_logger = logging.getLogger('dockermon-restart')
+logger = logging.getLogger(__name__)
 
 
 class NotificationService:
@@ -28,7 +27,7 @@ class NotificationService:
             email_msg['To'] = email_to
             email_msg['Subject'] = email_subject
             smtp = smtplib.SMTP(self.email_smtp_server)
-            restart_logger.info('Sending mail to email addresses %s...', email_to)
+            logger.info('Sending mail to email addresses %s...', email_to)
             smtp.sendmail(email_from, self.mail_recipients, email_msg.as_string())
             smtp.quit()
 
