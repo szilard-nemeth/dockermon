@@ -55,45 +55,51 @@ class RestartService(Notifyable):
         self.cached_container_names = {'restart': [], 'do_not_restart': []}
         self.restarts = {}
 
-    def container_started(self, container_name, event_details):
-        self.maintain_container_restart_counter(container_name)
+    def container_started(self, event):
+        self.maintain_container_restart_counter(event.container_name)
 
-    def container_became_healthy(self, container_name, event_details):
-        self.maintain_container_restart_counter(container_name)
+    def container_became_healthy(self, event):
+        self.maintain_container_restart_counter(event.container_name)
 
-    def container_stopped_by_hand(self, container_name, event_details):
+    def container_stopped_by_hand(self, event):
         logger.debug("Container %s is stopped/killed, but WILL NOT BE restarted "
-                     "as it was stopped/killed by hand", container_name)
+                     "as it was stopped/killed by hand", event.container_name)
 
-    def container_dead(self, container_name, event_details):
-        if self.is_restart_allowed(container_name) and self.check_container_is_restartable(container_name):
+    def container_dead(self, event):
+        container_name = event.container_name
+        if self.is_restart_allowed(container_name) and \
+                self.check_container_is_restartable(container_name):
             if self.params.do_restart:
                 logger.info("Container %s dead unexpectedly, restarting...", container_name)
-                self.do_restart(event_details)
+                self.do_restart(event)
             else:
                 logger.info("Container %s dead unexpectedly, skipping restart but sending mail, as per configuration!",
                             container_name)
-                self.notification_service.send_mail("Container %s dead unexpectedly" % container_name,
-                                                    json.dumps(event_details))
+                mail_subject = "Container %s dead unexpectedly" % container_name
+                mail_body = RestartService.create_mail_body_from_docker_event(event)
+                self.notification_service.send_mail(mail_subject, mail_body)
         else:
             logger.warn("Container %s is stopped/killed, but WILL NOT BE restarted again, "
                         "as maximum restart count is reached: %s", container_name, self.params.restart_limit)
             if not self.is_mail_sent(container_name):
                 mail_subject = "Maximum restart count is reached for container %s" % container_name
-                self.notification_service.send_mail(mail_subject, json.dumps(event_details))
+                mail_body = RestartService.create_mail_body_from_docker_event(event)
+                self.notification_service.send_mail(mail_subject, mail_body)
                 self.set_mail_sent(container_name)
             pass
 
-    def container_became_unhealthy(self, container_name, event_details):
+    def container_became_unhealthy(self, event):
+        container_name = event.container_name
         if self.is_restart_allowed(container_name) and self.check_container_is_restartable(container_name):
             if self.params.do_restart:
                 logger.info("Container %s became unhealthy, restarting...", container_name)
-                self.do_restart(event_details)
+                self.do_restart(event)
             else:
                 logger.info("Container %s became unhealthy, skipping restart but sending mail, as per configuration!",
                             container_name)
-                self.notification_service.send_mail("Container %s became unhealthy" % container_name,
-                                                    json.dumps(event_details))
+                mail_subject = "Container %s became unhealthy" % container_name
+                mail_body = RestartService.create_mail_body_from_docker_event(event)
+                self.notification_service.send_mail(mail_subject, mail_body)
 
     def log_restart_container(self, container_name):
         count_of_restarts = self.get_performed_restart_count(container_name)
@@ -171,18 +177,14 @@ class RestartService(Notifyable):
             logger.info("Last restart time was %s", DateHelper.format_timestamp(last_restart))
             self.reset_restart_data(container_name)
 
-    def do_restart(self, parsed_json):
-        container_id = parsed_json['id']
-        container_name = parsed_json['Actor']['Attributes']["name"]
-        compose_service_name = parsed_json['Actor']['Attributes']["com.docker.compose.service"]
-
+    def do_restart(self, event):
         sock, hostname = DockerMon.connect(self.socket_url)
         logger.info("Sending restart request to Docker API for container: %s (%s), compose service name: %s",
-                    container_name, container_id, compose_service_name)
-        request = self.create_docker_restart_request(container_id, hostname)
-        self.handle_restart_request(request, sock, container_name, json.dumps(parsed_json))
+                    event.container_name, event.container_id, event.service_name)
+        request = self.create_docker_restart_request(event.container_id, hostname)
+        self.handle_restart_request(request, sock, event)
 
-    def handle_restart_request(self, request, sock, container_name, mail_content):
+    def handle_restart_request(self, request, sock, event):
         with closing(sock):
             sock.sendall(request)
             header, payload = DockerMon.read_http_header(sock)
@@ -190,11 +192,16 @@ class RestartService(Notifyable):
 
             # checking the HTTP status, no payload should be received!
             if status == HTTP_NO_CONTENT:
-                self.save_restart_event_happened(container_name)
-                log_record = self.log_restart_container(container_name)
-                self.notification_service.send_mail(log_record, mail_content)
+                mail_body = RestartService.create_mail_body_from_docker_event(event)
+                self.save_restart_event_happened(event.container_name)
+                log_record = self.log_restart_container(event.container_name)
+                self.notification_service.send_mail(log_record, mail_body)
             else:
                 raise DockermonError('bad HTTP status: %s %s' % (status, reason))
+
+    @staticmethod
+    def create_mail_body_from_docker_event(event):
+        return 'Parsed event: %s\n\n\nOriginal docker event: %s\n' % (event, event.details)
 
     @staticmethod
     def create_docker_restart_request(container_id, hostname):

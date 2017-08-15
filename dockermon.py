@@ -13,6 +13,7 @@ import logging.config
 import socket
 from argumenthandler import ArgumentHandler
 import notificationservice
+from dockerevent import DockerEvent
 from eventbroadcaster import EventBroadcaster
 
 if version_info[:2] < (3, 0):
@@ -130,13 +131,12 @@ class DockerMon:
                 buf = [data[start + size + 2:]]  # Skip \r\n suffix
 
     @staticmethod
-    def print_callback(msg):
-        """Print callback, prints message as info log as JSON in one line."""
-        logger.debug('EVENT: %s' % json.dumps(msg))
-        event_type = msg['status']
-        container_name = msg['Actor']['Attributes']["name"]
-        compose_service_name = msg['Actor']['Attributes']["com.docker.compose.service"]
-        logger.info('EVENT:::event type: %s, container name: %s, compose service name: %s' % (event_type, container_name, compose_service_name))
+    def print_callback(event_details):
+        """Print callback, prints message as debug log as JSON in one line and docker event on info log"""
+        logger.debug('EVENT (json): %s' % json.dumps(event_details))
+        docker_event = DockerEvent.from_dict(event_details)
+
+        logger.info('EVENT: %s' % docker_event)
 
     @staticmethod
     def prog_callback(prog, msg):
