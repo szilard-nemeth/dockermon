@@ -32,8 +32,9 @@ class ArgumentHandler:
                             dest='config_file',
                             help='config file in yaml format',
                             type=argparse.FileType(mode='r'))
-        parser.add_argument('--do-not-print-events', default=False, action='store_true',
-                            help='Do not print docker events to console')
+        parser.add_argument('--print-all-events', default=True, action='store_true',
+                            help='Print docker events to console')
+        parser.set_defaults(print_all_events=True)
 
         # restart containers on unhealthy state OR when they are dead
         # manual kill won't restart

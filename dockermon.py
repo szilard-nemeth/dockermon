@@ -177,7 +177,7 @@ if __name__ == '__main__':
 
     def get_callbacks(args):
         callbacks = []
-        if not args.do_not_print_events:
+        if args.print_all_events:
             callbacks.append(DockerMon.print_callback)
         if args.prog:
             prog = shlex.split(args.prog)
