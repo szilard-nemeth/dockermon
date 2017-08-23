@@ -62,9 +62,9 @@ class ArgumentHandler:
                                            action='store')
 
         notification_options_group = parser.add_argument_group('Notification options')
-        notification_options_group.add_argument('--notification-email-addresses-path', default=None,
-                                                dest='notification_email_addresses_path',
-                                                help='Send mail notifications of container restarts to the addresses from the specified file',
+        notification_options_group.add_argument('--notification-email-addresses', default=None,
+                                                dest='notification_email_addresses',
+                                                help='Send mail notifications of container restarts to the specified email addresses',
                                                 action='store')
         notification_options_group.add_argument('---notification-email-server', default=None,
                                                 dest='notification_email_server',
@@ -92,6 +92,8 @@ class ArgumentHandler:
 
                 logger.debug("Using param from config file: %s=%s", key, value)
                 if isinstance(value, list):
+                    if key not in arg_dict or arg_dict[key] is None:
+                        arg_dict[key] = []
                     for v in value:
                         arg_dict[key].append(v)
                 else:

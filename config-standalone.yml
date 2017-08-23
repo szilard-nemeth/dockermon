@@ -1,7 +1,7 @@
 restart-limit: 3
 restart-threshold: 10
 restart-reset-period: 3
-containers-to-watch: ['*tracking-web*', '*tracking-public*', '*tracking-maintenance*', '*docforge*', '*mailcatcher*', '*tracking*nginx*']
-notification-email-addresses-path: /home/snemeth/dockermon/dockermon-email-recipients.list
+containers-to-watch: ['*thinpoc*', '*tracking-web*', '*tracking-public*', '*tracking-maintenance*', '*docforge*', '*mailcatcher*', '*tracking*nginx*']
+notification-email-addresses: ['nsziszy@gmail.com']
 notification-email-server: smtp.gmail.com
 print-all-events: false
