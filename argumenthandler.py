@@ -71,6 +71,11 @@ class ArgumentHandler:
                                                 help='Mail server for container restart email notifications',
                                                 action='store')
 
+        notification_options_group.add_argument('---notification-hostname', default='root',
+                                                dest='notification_hostname',
+                                                help='Hostname for container restart email notifications',
+                                                action='store')
+
         return parser
 
     @staticmethod

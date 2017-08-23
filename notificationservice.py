@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     def __init__(self, args):
         self.mail_recipient_addresses = NotificationService.get_mail_addresses(args)
-        self.mail_hostname = NotificationService.get_mail_hostname()
+        self.mail_hostname = NotificationService.get_mail_hostname(args)
         self.email_smtp_server = NotificationService.get_mail_server_address(args)
 
     def send_mail(self, subject, msg):
@@ -41,18 +41,8 @@ class NotificationService:
             return email_recipient_addresses
 
     @staticmethod
-    def get_mail_hostname():
-        host_hostname_filename = '/dockermon/host-hostname'
-        if os.path.isfile(host_hostname_filename):
-            mail_hostname = open(host_hostname_filename).read().replace('\n', '')
-            logger.debug("Provided hostname of host machine %s", mail_hostname)
-
-        try:
-            mail_hostname
-        except NameError:
-            mail_hostname = 'root'
-        else:
-            pass
+    def get_mail_hostname(args):
+        mail_hostname = args.notification_hostname
         logger.debug("Hostname will be used for notification emails: %s", mail_hostname)
         return mail_hostname
 

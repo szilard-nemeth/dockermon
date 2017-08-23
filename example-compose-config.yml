@@ -13,4 +13,5 @@ services:
      - "CONTAINERS_TO_WATCH=['*container1*', '*container2*', '*container3*']"
      - "NOTIFICATION_EMAIL_ADDRESSES=['nsziszy@gmail.com']"
      - "NOTIFICATION_EMAIL_SERVER=relay.example.com"
+     - "NOTIFICATION_HOSTNAME=testhostname"
      - "PRINT_ALL_EVENTS=true"
