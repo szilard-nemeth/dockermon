@@ -4,6 +4,5 @@ restart-reset-period: 3
 containers-to-watch: ['*thinpoc*', '*tracking-web*', '*tracking-public*', '*tracking-maintenance*', '*docforge*', '*mailcatcher*', '*tracking*nginx*']
 notification-email-addresses: ['nsziszy@gmail.com']
 notification-email-server: smtp.gmail.com
-notification-hostname: testhostname
 print-all-events: true
 restart_containers_on_die: true

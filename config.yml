@@ -4,5 +4,4 @@ restart-reset-period: ${RESTART_RESET_PERIOD}
 containers-to-watch: ${CONTAINERS_TO_WATCH}
 notification-email-addresses: ${NOTIFICATION_EMAIL_ADDRESSES}
 notification-email-server: ${NOTIFICATION_EMAIL_SERVER}
-notification-hostname: ${NOTIFICATION_HOSTNAME}
 print-all-events: ${PRINT_ALL_EVENTS}
