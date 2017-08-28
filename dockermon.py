@@ -136,7 +136,7 @@ class DockerMon:
         logger.debug('EVENT (json): %s' % json.dumps(event_details))
         docker_event = DockerEvent.from_dict(event_details)
 
-        logger.info('EVENT: %s' % docker_event)
+        logger.debug('EVENT: %s' % docker_event)
 
     @staticmethod
     def prog_callback(prog, msg):
