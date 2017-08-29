@@ -2,7 +2,7 @@ import time
 
 import logging
 
-from dockerevent import DockerEvent
+from dockerevent import DockerEvent, InvalidDockerEventError
 from notifyable import Notifyable
 
 logger = logging.getLogger(__name__)
@@ -76,20 +76,24 @@ class EventBroadcaster:
 
     def broadcast_event(self, event_details):
         if "status" in event_details:
-            docker_event = DockerEvent.from_dict(event_details)
-            container_name = docker_event.container_name
+            try:
+                docker_event = DockerEvent.from_dict(event_details)
+            except InvalidDockerEventError:
+                logger.error('Invalid docker event received %s' % event_details)
+            else:
+                container_name = docker_event.container_name
 
-            if docker_event.type in self.events_to_watch:
-                self.save_docker_event(docker_event)
-                if docker_event.type == 'start':
-                    self.notify_container_started(docker_event)
-                elif docker_event.type == 'health_status: healthy':
-                    self.notify_container_became_healthy(docker_event)
-                elif docker_event.type == 'health_status: unhealthy':
-                    if self.check_notify_required(container_name):
-                        self.notify_container_became_unhealthy(docker_event)
-                elif self.check_notify_required(container_name):
-                    self.notify_container_dead(docker_event)
+                if docker_event.type in self.events_to_watch:
+                    self.save_docker_event(docker_event)
+                    if docker_event.type == 'start':
+                        self.notify_container_started(docker_event)
+                    elif docker_event.type == 'health_status: healthy':
+                        self.notify_container_became_healthy(docker_event)
+                    elif docker_event.type == 'health_status: unhealthy':
+                        if self.check_notify_required(container_name):
+                            self.notify_container_became_unhealthy(docker_event)
+                    elif self.check_notify_required(container_name):
+                        self.notify_container_dead(docker_event)
 
     def check_notify_required(self, container_name):
         docker_events = self.captured_events[container_name]

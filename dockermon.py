@@ -13,7 +13,7 @@ import logging.config
 import socket
 from argumenthandler import ArgumentHandler
 import notificationservice
-from dockerevent import DockerEvent
+from dockerevent import DockerEvent, InvalidDockerEventError
 from eventbroadcaster import EventBroadcaster
 
 if version_info[:2] < (3, 0):
@@ -134,9 +134,13 @@ class DockerMon:
     def print_callback(event_details):
         """Print callback, prints message as debug log as JSON in one line and docker event on info log"""
         logger.debug('EVENT (json): %s' % json.dumps(event_details))
-        docker_event = DockerEvent.from_dict(event_details)
 
-        logger.debug('EVENT: %s' % docker_event)
+        try:
+            docker_event = DockerEvent.from_dict(event_details)
+        except InvalidDockerEventError:
+            logger.error('Invalid docker event received %s' % event_details)
+        else:
+            logger.debug('EVENT: %s' % docker_event)
 
     @staticmethod
     def prog_callback(prog, msg):
