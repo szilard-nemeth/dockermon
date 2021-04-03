@@ -7,6 +7,7 @@ import socket
 logger = logging.getLogger(__name__)
 
 
+#TODO Use python-commons EmailService?
 class NotificationService:
     def __init__(self, args):
         self.mail_recipient_addresses = NotificationService.get_mail_addresses(args)
